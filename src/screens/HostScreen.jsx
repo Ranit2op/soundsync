@@ -1,24 +1,24 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { Button, Text, Card, IconButton, Chip, Divider } from 'react-native-paper';
-import * as DocumentPicker from 'expo-document-picker';
+import { View, StyleSheet, Platform, Alert, PermissionsAndroid } from 'react-native';
+import { Button, Text, Card, IconButton, Chip } from 'react-native-paper';
 import * as Network from 'expo-network';
-import { useAudioPlayer } from 'expo-audio';
-import * as FileSystem from 'expo-file-system/legacy';
 import { HostServer } from '../network/HostServer';
 
-export function HostScreen({ onBack }) {
-  const [fileName, setFileName] = useState(null);
-  const [fileUri, setFileUri] = useState(null);
-  const [ip, setIp] = useState('');
-  const [serverRunning, setServerRunning] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [status, setStatus] = useState('');
-  const serverRef = useRef(null);
-  const intervalRef = useRef(null);
-  const player = useAudioPlayer(fileUri ?? undefined);
+// States for the broadcast lifecycle
+const STATE = {
+  IDLE: 'idle',           // Initial - ready to start
+  REQUESTING: 'requesting', // Waiting for MediaProjection permission
+  BROADCASTING: 'broadcasting', // Actively streaming
+  ERROR: 'error',
+};
 
-  // Ensure server is stopped when component unmounts (e.g. going back or hot reloading)
+export function HostScreen({ onBack }) {
+  const [broadcastState, setBroadcastState] = useState(STATE.IDLE);
+  const [ip, setIp] = useState('');
+  const [statusText, setStatusText] = useState('Tap "Start Broadcast" to begin streaming live audio.');
+  const serverRef = useRef(null);
+
+  // Stop server and reset state on unmount
   useEffect(() => {
     return () => {
       if (serverRef.current) {
@@ -28,65 +28,83 @@ export function HostScreen({ onBack }) {
     };
   }, []);
 
-  const pickFile = useCallback(async () => {
+ const startBroadcast = useCallback(async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({ type: 'audio/*' });
-      if (result.canceled) return;
+      setBroadcastState(STATE.REQUESTING);
+      setStatusText('Waiting for Android permission...');
 
-      const pickedAsset = result.assets[0];
-      const targetUri = `${FileSystem.cacheDirectory}${pickedAsset.name}`;
-      
-      setStatus('Preparing audio file...');
-      await FileSystem.copyAsync({
-        from: pickedAsset.uri,
-        to: targetUri,
-      });
+      // ✅ NEW — RECORD_AUDIO runtime permission chaite hobe, noyle
+      // native audio policy register korte partbe na
+      if (Platform.OS === 'android') {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          {
+            title: 'Microphone Permission Required',
+            message: 'This app needs microphone permission to capture and broadcast system audio.',
+            buttonPositive: 'Allow',
+            buttonNegative: 'Deny',
+          }
+        );
 
-      setFileUri(targetUri);
-      setFileName(pickedAsset.name);
-      setStatus('File ready to broadcast.');
-    } catch (e) {
-      setStatus(`Error picking file: ${e.message}`);
-    }
-  }, []);
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          setBroadcastState(STATE.ERROR);
+          setStatusText('Microphone permission denied.');
+          Alert.alert(
+            'Permission Required',
+            'Microphone permission is required to broadcast audio. Please allow it in app settings.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+      }
 
-  const startServer = useCallback(async () => {
-    if (!fileUri || !fileName) return;
-    try {
       const localIp = await Network.getIpAddressAsync();
       setIp(localIp);
 
       serverRef.current = new HostServer();
-      serverRef.current.start(fileUri, fileName);
-      setServerRunning(true);
-      setStatus('Waiting for listeners to join...');
+
+      // This calls AudioCaptureModule.startCapture() internally,
+      // which triggers the Android MediaProjection permission dialog.
+      // No file selection needed — it captures live system audio.
+      await serverRef.current.start((errMsg) => {
+        // ✅ NEW — native capture fail korle ei callback ashbe
+        setBroadcastState(STATE.ERROR);
+        setStatusText(`Broadcast failed: ${errMsg}`);
+        Alert.alert('Broadcast Stopped', errMsg, [{ text: 'OK' }]);
+      });
+
+      setBroadcastState(STATE.BROADCASTING);
+      setStatusText('🔴 Live — streaming system audio to listeners');
     } catch (e) {
-      setStatus(`Error starting server: ${e.message}`);
+      console.error('[HostScreen] Failed to start broadcast:', e);
+      setBroadcastState(STATE.ERROR);
+      const msg = e?.message || String(e);
+      setStatusText(`Error: ${msg}`);
+
+      if (serverRef.current) {
+        serverRef.current.stop();
+        serverRef.current = null;
+      }
+
+      Alert.alert(
+        'Broadcast Failed',
+        msg.includes('PERMISSION_DENIED')
+          ? 'Permission was denied. Please allow audio capture when prompted.'
+          : `Could not start broadcast: ${msg}`,
+        [{ text: 'OK' }]
+      );
     }
-  }, [fileUri, fileName]);
+  }, []);
 
-  const startPlayback = useCallback(() => {
-    if (!serverRef.current) return;
-    const startAt = Date.now() + 3000;
-    serverRef.current.broadcastStartAt(startAt);
-
-    const delay = startAt - Date.now();
-    setStatus(`Starting in ${Math.round(delay / 1000)}s...`);
-    setTimeout(() => {
-      player.seekTo(0);
-      player.play();
-      setIsPlaying(true);
-      setStatus('Playing 🎵');
-    }, Math.max(delay, 0));
-  }, [player]);
-
-  const stopServer = useCallback(() => {
+  const stopBroadcast = useCallback(() => {
     serverRef.current?.stop();
-    player.pause();
-    setServerRunning(false);
-    setIsPlaying(false);
-    setStatus('');
-  }, [player]);
+    serverRef.current = null;
+    setBroadcastState(STATE.IDLE);
+    setStatusText('Broadcast stopped.');
+  }, []);
+
+  const isRequesting = broadcastState === STATE.REQUESTING;
+  const isBroadcasting = broadcastState === STATE.BROADCASTING;
 
   return (
     <View style={styles.container}>
@@ -96,107 +114,83 @@ export function HostScreen({ onBack }) {
 
       <Text variant="displaySmall" style={styles.title}>Host</Text>
       <Text variant="bodyMedium" style={styles.subtitle}>
-        Share your audio with nearby devices
+        Stream live system audio to nearby listeners
       </Text>
 
-      {/* File Selection Card */}
-      <Card style={styles.card} mode="elevated">
-        <Card.Content style={styles.fileCardContent}>
-          <View style={styles.fileInfo}>
+      {/* Status Card */}
+      <Card style={[styles.card, isBroadcasting && styles.cardLive]} mode="elevated">
+        <Card.Content style={styles.cardContent}>
+          <View style={styles.statusIconRow}>
             <IconButton
-              icon={fileName ? 'music-note' : 'file-music-outline'}
-              size={32}
-              style={styles.fileIcon}
+              icon={isBroadcasting ? 'broadcast' : isRequesting ? 'loading' : 'cast-audio'}
+              size={40}
+              iconColor={isBroadcasting ? '#ef4444' : '#6366f1'}
+              style={[styles.statusIcon, isBroadcasting && styles.statusIconLive]}
             />
-            <View style={{ flex: 1 }}>
-              <Text variant="labelLarge" style={styles.fileLabel}>
-                {fileName ? 'Selected File' : 'No File Selected'}
-              </Text>
-              <Text
-                variant="bodySmall"
-                style={styles.fileName}
-                numberOfLines={1}
-                ellipsizeMode="middle"
-              >
-                {fileName ?? 'Tap below to choose an audio file'}
-              </Text>
-            </View>
           </View>
-          <Divider style={styles.divider} />
-          <Button
-            icon="folder-open-outline"
-            mode="text"
-            onPress={pickFile}
-            style={styles.pickButton}
-          >
-            Choose Audio File
-          </Button>
+
+          {isBroadcasting && ip ? (
+            <View style={styles.chipRow}>
+              <Chip icon="wifi" style={styles.chip} textStyle={styles.chipText}>
+                {ip}
+              </Chip>
+              <Chip icon="circle" style={styles.liveChip} textStyle={styles.liveChipText}>
+                LIVE
+              </Chip>
+            </View>
+          ) : null}
+
+          <Text variant="bodyLarge" style={styles.statusText}>
+            {statusText}
+          </Text>
+
+          {!isBroadcasting && (
+            <Text variant="bodySmall" style={styles.hintText}>
+              Any audio playing on this device (YouTube, music, etc.) will be streamed live.
+            </Text>
+          )}
         </Card.Content>
       </Card>
 
-      {/* Server Status / Controls */}
-      {!serverRunning ? (
+      {/* Action Button */}
+      {!isBroadcasting ? (
         <Button
           mode="contained"
-          onPress={startServer}
-          disabled={!fileUri}
+          onPress={startBroadcast}
+          disabled={isRequesting}
+          loading={isRequesting}
           icon="broadcast"
           style={styles.startButton}
           contentStyle={styles.startButtonContent}
           labelStyle={styles.startButtonLabel}
         >
-          Start Broadcasting
+          {isRequesting ? 'Requesting Permission…' : 'Start Broadcast'}
         </Button>
       ) : (
-        <Card style={styles.card} mode="elevated">
-          <Card.Content style={styles.serverCardContent}>
-            <View style={styles.statusRow}>
-              <Chip icon="wifi" style={styles.chip} textStyle={styles.chipText}>
-                {ip}
-              </Chip>
-            </View>
+        <Button
+          mode="contained"
+          onPress={stopBroadcast}
+          icon="stop-circle"
+          style={styles.stopButton}
+          contentStyle={styles.startButtonContent}
+          labelStyle={styles.startButtonLabel}
+          buttonColor="#ef4444"
+        >
+          Stop Broadcast
+        </Button>
+      )}
 
-            <Text variant="bodyLarge" style={styles.statusText}>{status}</Text>
-
-            <View style={styles.serverActions}>
-              {!isPlaying ? (
-                <Button
-                  mode="contained"
-                  icon="play"
-                  onPress={startPlayback}
-                  style={styles.playButton}
-                  contentStyle={styles.actionButtonContent}
-                >
-                  Start Playback
-                </Button>
-              ) : (
-                <Button
-                  mode="contained"
-                  icon="pause"
-                  onPress={() => { 
-                    player.pause(); 
-                    setIsPlaying(false); 
-                    setStatus('Paused');
-                    serverRef.current?.stopPlayback();
-                  }}
-                  style={styles.pauseButton}
-                  contentStyle={styles.actionButtonContent}
-                >
-                  Pause
-                </Button>
-              )}
-              <Button
-                mode="outlined"
-                icon="stop"
-                onPress={stopServer}
-                style={styles.stopButton}
-                contentStyle={styles.actionButtonContent}
-              >
-                Stop Server
-              </Button>
-            </View>
-          </Card.Content>
-        </Card>
+      {broadcastState === STATE.ERROR && (
+        <Button
+          mode="outlined"
+          onPress={() => {
+            setBroadcastState(STATE.IDLE);
+            setStatusText('Tap "Start Broadcast" to begin streaming live audio.');
+          }}
+          style={styles.retryButton}
+        >
+          Try Again
+        </Button>
       )}
     </View>
   );
@@ -229,35 +223,68 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     elevation: 4,
   },
-  fileCardContent: {
-    padding: 20,
+  cardLive: {
+    borderWidth: 2,
+    borderColor: '#ef4444',
   },
-  fileInfo: {
-    flexDirection: 'row',
+  cardContent: {
+    padding: 24,
     alignItems: 'center',
-    gap: 12,
   },
-  fileIcon: {
+  statusIconRow: {
+    marginBottom: 12,
+  },
+  statusIcon: {
     backgroundColor: '#eef2ff',
-    borderRadius: 16,
+    borderRadius: 40,
   },
-  fileLabel: {
+  statusIconLive: {
+    backgroundColor: '#fee2e2',
+  },
+  chipRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  chip: {
+    backgroundColor: '#eef2ff',
+  },
+  chipText: {
+    fontSize: 13,
+  },
+  liveChip: {
+    backgroundColor: '#fee2e2',
+  },
+  liveChipText: {
+    fontSize: 13,
+    color: '#ef4444',
+    fontWeight: '700',
+  },
+  statusText: {
+    textAlign: 'center',
     color: '#1a1a1a',
-    fontWeight: '600',
+    fontWeight: '500',
+    marginBottom: 8,
   },
-  fileName: {
+  hintText: {
+    textAlign: 'center',
     color: '#6b7280',
-    marginTop: 2,
-  },
-  divider: {
-    marginVertical: 16,
-  },
-  pickButton: {
-    alignSelf: 'center',
+    marginTop: 4,
   },
   startButton: {
     borderRadius: 16,
     marginTop: 8,
+    backgroundColor: '#6366f1',
+  },
+  stopButton: {
+    borderRadius: 16,
+    marginTop: 8,
+  },
+  retryButton: {
+    borderRadius: 16,
+    marginTop: 12,
   },
   startButtonContent: {
     paddingVertical: 8,
@@ -265,46 +292,5 @@ const styles = StyleSheet.create({
   startButtonLabel: {
     fontSize: 16,
     fontWeight: '600',
-  },
-  serverCardContent: {
-    padding: 24,
-  },
-  statusRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 16,
-  },
-  chip: {
-    backgroundColor: '#eef2ff',
-  },
-  listenerChip: {
-    backgroundColor: '#ecfdf5',
-  },
-  chipText: {
-    fontSize: 13,
-  },
-  statusText: {
-    textAlign: 'center',
-    color: '#4a4a4a',
-    fontWeight: '500',
-    marginBottom: 20,
-  },
-  serverActions: {
-    gap: 10,
-  },
-  playButton: {
-    borderRadius: 14,
-    backgroundColor: '#16a34a',
-  },
-  pauseButton: {
-    borderRadius: 14,
-    backgroundColor: '#f59e0b',
-  },
-  stopButton: {
-    borderRadius: 14,
-  },
-  actionButtonContent: {
-    paddingVertical: 6,
   },
 });

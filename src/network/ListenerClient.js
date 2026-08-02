@@ -1,13 +1,25 @@
 import * as Network from 'expo-network';
+import TcpSocket from 'react-native-tcp-socket';
+import { NativeModules, Platform } from 'react-native';
+import { Buffer } from 'buffer';
 
 const FILE_PORT = 8990;
-const SYNC_SAMPLES = 5;
+const STREAM_SAMPLE_RATE = 44100;
+const STREAM_IS_STEREO = false;
+const { AudioPlayerModule } = NativeModules;
+const AUDIO_LOG_PREFIX = '[ListenerAudioPipeline]';
 
 export class ListenerClient {
-  clockOffset = 0;
   hostIp = '';
-  pollingInterval = null;
+  clientSocket = null;
   scanAbortController = null;
+  incomingBuffer = Buffer.alloc(0);
+  isConnected = false;
+  onDisconnectCallback = null;
+  receivedFrameCount = 0;
+  receivedByteCount = 0;
+  receivedSocketChunkCount = 0;
+  lastReceiveLogAt = 0;
 
   async discoverHosts(onHostDiscovered, onProgress) {
     this.stopScan();
@@ -96,7 +108,8 @@ export class ListenerClient {
         const data = await res.json();
         return {
           ip,
-          fileName: data.fileName || 'Shared Audio',
+          fileName: data.fileName || 'Live System Audio',
+          isLive: data.isLive ?? true,
         };
       }
     } catch (e) {
@@ -108,99 +121,220 @@ export class ListenerClient {
     return null;
   }
 
-  async connect(hostIp, onStart) {
-    console.log(`[ListenerClient] 🚀 Starting HTTP connection to Host IP: ${hostIp}`);
+  async connect(hostIp, onConnected, onDisconnect) {
+    console.log(`[ListenerClient] 🚀 Connecting to Host IP: ${hostIp}`);
     this.hostIp = hostIp;
+    this.onDisconnectCallback = onDisconnect;
+    this.incomingBuffer = Buffer.alloc(0);
+    this.receivedFrameCount = 0;
+    this.receivedByteCount = 0;
+    this.receivedSocketChunkCount = 0;
+    this.lastReceiveLogAt = Date.now();
 
     const hostDetails = await this.probeHttpDetails(hostIp);
     if (!hostDetails) {
       throw new Error(`Host at ${hostIp} is not broadcasting.`);
     }
 
-    console.log(`[ListenerClient] ✅ Host verified. Syncing clock...`);
-    await this.syncClock();
+    // Initialize native audio player (AudioTrack)
+    if (Platform.OS === 'android' && AudioPlayerModule) {
+      console.log(
+        `${AUDIO_LOG_PREFIX} Initializing AudioTrack: sampleRate=${STREAM_SAMPLE_RATE}, stereo=${STREAM_IS_STEREO}`
+      );
+      await AudioPlayerModule.initPlayer(STREAM_SAMPLE_RATE, STREAM_IS_STEREO);
+      console.log(`${AUDIO_LOG_PREFIX} AudioTrack init resolved successfully`);
+    } else if (Platform.OS === 'android') {
+      console.error(`${AUDIO_LOG_PREFIX} AudioPlayerModule is missing`);
+      throw new Error('AudioPlayerModule is not available in this build.');
+    }
 
-    console.log(`[ListenerClient] ✅ Connection setup complete.`);
-    this.startPolling(onStart);
-  }
+    // Establish TCP connection for real-time streaming
+    return new Promise((resolve, reject) => {
+      let isHeaderPassed = false;
+      // Accumulate header bytes across TCP chunks — the HTTP response header
+      // may be fragmented across multiple 'data' events by react-native-tcp-socket
+      let headerBuffer = Buffer.alloc(0);
 
-  startPolling(onStart) {
-    this.stopPolling();
-    let hasTriggeredStart = false;
+      this.clientSocket = TcpSocket.createConnection({
+        port: FILE_PORT,
+        host: hostIp,
+      }, () => {
+        console.log(`[ListenerClient] ✅ TCP socket connected. Requesting live stream...`);
+        this.clientSocket.write('GET /live HTTP/1.1\r\nHost: ' + hostIp + '\r\n\r\n');
+        this.isConnected = true;
+        onConnected?.();
+        resolve();
+      });
 
-    this.pollingInterval = setInterval(async () => {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 1000);
+      this.clientSocket.on('data', (data) => {
+        const dataBuffer = Buffer.from(data);
+        this.receivedSocketChunkCount++;
+        console.log(
+          `${AUDIO_LOG_PREFIX} TCP chunk #${this.receivedSocketChunkCount} received: ${dataBuffer.length} bytes`
+        );
 
-        const res = await fetch(`http://${this.hostIp}:${FILE_PORT}/status`, { signal: controller.signal });
-        clearTimeout(timeout);
+        if (!isHeaderPassed) {
+          // Accumulate into header buffer to handle fragmented HTTP headers
+          headerBuffer = Buffer.concat([headerBuffer, dataBuffer]);
+          console.log(
+            `${AUDIO_LOG_PREFIX} Header accumulation buffer: ${headerBuffer.length} bytes total`
+          );
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data.startAt && !hasTriggeredStart) {
-            console.log(`[ListenerClient] 🎵 Received startAt: ${data.startAt}`);
-            hasTriggeredStart = true;
-            onStart(data.startAt);
-          } else if (!data.startAt) {
-            hasTriggeredStart = false;
+          // Look for HTTP response header delimiter \r\n\r\n in the accumulated buffer
+          const headerIndex = headerBuffer.indexOf('\r\n\r\n');
+          if (headerIndex !== -1) {
+            isHeaderPassed = true;
+            const audioData = headerBuffer.slice(headerIndex + 4);
+            const headerText = headerBuffer.slice(0, headerIndex).toString();
+            console.log(
+              `${AUDIO_LOG_PREFIX} ✅ Stream header parsed (${headerIndex} bytes): "${headerText.substring(0, 80)}..."; initial audio bytes=${audioData.length}`
+            );
+            // Free the header buffer — no longer needed
+            headerBuffer = null;
+            if (audioData.length > 0) {
+              this.processIncomingAudio(audioData);
+            } else {
+              console.log(`${AUDIO_LOG_PREFIX} Header chunk contained no audio payload`);
+            }
+            return;
           }
+
+          // Safety: prevent unbounded buffering if header never arrives
+          if (headerBuffer.length > 4096) {
+            console.error(
+              `${AUDIO_LOG_PREFIX} ❌ HTTP header exceeded 4096 bytes without delimiter; aborting`
+            );
+            this.disconnect();
+            return;
+          }
+
+          console.log(
+            `${AUDIO_LOG_PREFIX} Waiting for complete stream header; accumulated=${headerBuffer.length} bytes`
+          );
+          return;
         }
-      } catch (e) {
-        
+
+        this.processIncomingAudio(dataBuffer);
+      });
+
+      const handleCloseOrError = (err) => {
+        if (this.isConnected) {
+          console.log('[ListenerClient] 🛑 Disconnected from stream:', err?.message || 'Connection closed');
+          this.disconnect();
+        }
+      };
+
+      this.clientSocket.on('error', (err) => {
+        console.error(`${AUDIO_LOG_PREFIX} TCP socket error:`, err?.message || err);
+        if (!this.isConnected) {
+          reject(new Error(`Failed to connect to host: ${err.message}`));
+        } else {
+          handleCloseOrError(err);
+        }
+      });
+
+      this.clientSocket.on('close', () => handleCloseOrError(null));
+      this.clientSocket.on('end', () => handleCloseOrError(null));
+    });
+  }
+
+  processIncomingAudio(chunkBuffer) {
+    console.log(
+      `${AUDIO_LOG_PREFIX} Processing audio network payload: ${chunkBuffer.length} bytes; previousBuffer=${this.incomingBuffer.length}`
+    );
+    this.incomingBuffer = Buffer.concat([this.incomingBuffer, chunkBuffer]);
+    console.log(`${AUDIO_LOG_PREFIX} Framing buffer size after append: ${this.incomingBuffer.length} bytes`);
+
+    while (this.incomingBuffer.length >= 4) {
+      const payloadLen = this.incomingBuffer.readUInt32BE(0);
+      console.log(
+        `${AUDIO_LOG_PREFIX} Next frame declares payload=${payloadLen} bytes; available=${this.incomingBuffer.length - 4} bytes`
+      );
+
+      if (payloadLen <= 0) {
+        console.warn(`${AUDIO_LOG_PREFIX} Invalid empty audio frame encountered; dropping 4-byte header`);
+        this.incomingBuffer = this.incomingBuffer.slice(4);
+        continue;
       }
-    }, 500);
-  }
 
-  async syncClock() {
-    const samples = [];
-    for (let i = 0; i < SYNC_SAMPLES; i++) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 1000);
+      // If buffer contains complete frame
+      if (this.incomingBuffer.length >= 4 + payloadLen) {
+        const payload = this.incomingBuffer.slice(4, 4 + payloadLen);
+        this.incomingBuffer = this.incomingBuffer.slice(4 + payloadLen);
+        const nextFrameNumber = this.receivedFrameCount + 1;
+        console.log(
+          `${AUDIO_LOG_PREFIX} Audio frame #${nextFrameNumber} received: ${payload.length} PCM bytes; remainingBuffer=${this.incomingBuffer.length}`
+        );
 
-        const clientSendTime = Date.now();
-        const res = await fetch(`http://${this.hostIp}:${FILE_PORT}/ping`, { signal: controller.signal });
-        clearTimeout(timeout);
+        if (Platform.OS === 'android' && AudioPlayerModule) {
+          try {
+            const base64Chunk = payload.toString('base64');
+            console.log(
+              `${AUDIO_LOG_PREFIX} Audio frame #${nextFrameNumber} encoded for native bridge: base64Length=${base64Chunk.length}`
+            );
 
-        if (res.ok) {
-          const data = await res.json();
-          const rtt = Date.now() - clientSendTime;
-          const estimatedHostTimeAtReceive = data.hostTime + rtt / 2;
-          samples.push(estimatedHostTimeAtReceive - Date.now());
+            AudioPlayerModule.writeChunk(base64Chunk)
+              .then((result) => {
+                console.log(
+                  `${AUDIO_LOG_PREFIX} Audio frame #${nextFrameNumber} writeChunk resolved: ${JSON.stringify(result)}`
+                );
+              })
+              .catch((e) => {
+                console.warn(
+                  `${AUDIO_LOG_PREFIX} Audio frame #${nextFrameNumber} writeChunk failed:`,
+                  e?.message || e
+                );
+              });
+          } catch (e) {
+            console.warn(
+              `${AUDIO_LOG_PREFIX} Audio frame #${nextFrameNumber} failed before native write:`,
+              e?.message || e
+            );
+          }
+        } else if (Platform.OS === 'android') {
+          console.warn(`${AUDIO_LOG_PREFIX} Cannot write frame #${nextFrameNumber}; AudioPlayerModule unavailable`);
         }
-      } catch (e) {}
-      await new Promise((r) => setTimeout(r, 100));
-    }
 
-    if (samples.length === 0) {
-      console.warn('[ListenerClient] No ping response received. Defaulting clockOffset to 0');
-      this.clockOffset = 0;
-      return 0;
-    }
-
-    this.clockOffset = samples.reduce((a, b) => a + b, 0) / samples.length;
-    console.log(`[ListenerClient] Clock offset calculated: ${this.clockOffset}ms`);
-    return this.clockOffset;
-  }
-
-  getFileUrl() {
-    return `http://${this.hostIp}:${FILE_PORT}/audio`;
-  }
-
-  hostTimeToLocalTime(hostTime) {
-    return hostTime - this.clockOffset;
-  }
-
-  stopPolling() {
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
+        this.receivedFrameCount++;
+        this.receivedByteCount += payload.length;
+        const now = Date.now();
+        if (now - this.lastReceiveLogAt >= 3000) {
+          console.log(
+            `[ListenerClient] Received ${this.receivedFrameCount} audio frames (${this.receivedByteCount} bytes)`
+          );
+          this.lastReceiveLogAt = now;
+        }
+      } else {
+        // Wait for remaining frame data
+        console.log(
+          `${AUDIO_LOG_PREFIX} Incomplete audio frame; waiting for ${4 + payloadLen - this.incomingBuffer.length} more bytes`
+        );
+        break;
+      }
     }
   }
 
   disconnect() {
     this.stopScan();
-    this.stopPolling();
+    this.isConnected = false;
+
+    if (this.clientSocket) {
+      try {
+        this.clientSocket.destroy();
+      } catch (e) {}
+      this.clientSocket = null;
+    }
+
+    if (Platform.OS === 'android' && AudioPlayerModule) {
+      AudioPlayerModule.stopPlayer().catch(() => {});
+    }
+
+    this.incomingBuffer = Buffer.alloc(0);
+
+    if (this.onDisconnectCallback) {
+      const cb = this.onDisconnectCallback;
+      this.onDisconnectCallback = null;
+      cb();
+    }
   }
 }

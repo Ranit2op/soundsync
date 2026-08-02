@@ -11,4 +11,10 @@
 -keep class com.swmansion.reanimated.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
-# Add any project specific keep options here:
+# Custom React Native bridge modules used by the live audio flow.
+-keep class com.ranit25.BluetoothAudioApp.BluetoothAudioPackage { *; }
+-keep class com.ranit25.BluetoothAudioApp.AudioCaptureModule { *; }
+-keep class com.ranit25.BluetoothAudioApp.AudioPlayerModule { *; }
+-keepclassmembers class com.ranit25.BluetoothAudioApp.** {
+    @com.facebook.react.bridge.ReactMethod <methods>;
+}

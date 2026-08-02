@@ -1,24 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
-import { Button, Text, Card, ActivityIndicator, TextInput, IconButton, Divider } from 'react-native-paper';
-import { useAudioPlayer } from 'expo-audio';
-import { File, Paths } from 'expo-file-system';
-import * as Network from 'expo-network';
+import { Button, Text, Card, ActivityIndicator, TextInput, IconButton } from 'react-native-paper';
 import { ListenerClient } from '../network/ListenerClient';
-
-const withTimeout = async (promise, timeoutMs, message) => {
-  let timeoutId = null;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-  }
-};
 
 export function ListenerScreen({ onBack }) {
   const [status, setStatus] = useState('');
@@ -31,43 +14,10 @@ export function ListenerScreen({ onBack }) {
   const [manualIp, setManualIp] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
 
-  const clientRef = useRef(null);
-  const player = useAudioPlayer(null);
+  const [client] = useState(() => new ListenerClient());
   const isMounted = useRef(true);
 
-  // Initialize client instance once
-  if (!clientRef.current) {
-    clientRef.current = new ListenerClient();
-  }
-
-  useEffect(() => {
-    isMounted.current = true;
-    startScan();
-
-    return () => {
-      isMounted.current = false;
-      clientRef.current?.disconnect();
-    };
-  }, []);
-
-  const handleStartPlayback = useCallback((startAt) => {
-    const client = clientRef.current;
-    if (!client) return;
-
-    const localStartTime = client.hostTimeToLocalTime(startAt);
-    const delay = localStartTime - Date.now();
-
-    setStatus(`Starting playback in ${Math.max(Math.round(delay / 1000), 0)}s...`);
-    setTimeout(() => {
-      if (!isMounted.current) return;
-      player.seekTo(0);
-      player.play();
-      setStatus('Playing 🎵');
-    }, Math.max(delay, 0));
-  }, [player]);
-
   const startScan = useCallback(async () => {
-    const client = clientRef.current;
     if (!client) return;
 
     setIsScanning(true);
@@ -98,16 +48,15 @@ export function ListenerScreen({ onBack }) {
         setIsScanning(false);
       }
     }
-  }, []);
+  }, [client]);
 
   const stopScan = useCallback(() => {
-    clientRef.current?.stopScan();
+    client.stopScan();
     setIsScanning(false);
     setStatus('Scan stopped.');
-  }, []);
+  }, [client]);
 
   const connectToHost = useCallback(async (targetIp) => {
-    const client = clientRef.current;
     if (!client || !targetIp) return;
 
     stopScan();
@@ -116,28 +65,25 @@ export function ListenerScreen({ onBack }) {
     setStatus(`Connecting to ${targetIp}...`);
 
     try {
-      await client.connect(targetIp, (startAt) => {
-        handleStartPlayback(startAt);
-      });
-
-      if (!isMounted.current) return;
-      setStatus('Connected. Downloading audio file...');
-
-      const destFile = new File(Paths.cache, 'shared_audio.mp3');
-      if (destFile.exists) {
-        destFile.delete();
-      }
-
-      const downloadedFile = await withTimeout(
-        File.downloadFileAsync(client.getFileUrl(), destFile),
-        30000,
-        'Timed out while downloading audio from the host'
+      await client.connect(
+        targetIp,
+        () => {
+          if (isMounted.current) {
+            setConnectedHostIp(targetIp);
+            setStatus('Connected. Listening to live audio stream...');
+          }
+        },
+        () => {
+          if (isMounted.current) {
+            setConnectedHostIp(null);
+            setStatus('Disconnected from host.');
+          }
+        }
       );
 
       if (!isMounted.current) return;
-      player.replace(downloadedFile.uri);
       setConnectedHostIp(targetIp);
-      setStatus('Connected & Ready. Waiting for host to start playback...');
+      setStatus('Connected. Listening to live audio stream...');
     } catch (e) {
       if (isMounted.current) {
         setErrorMsg(e.message);
@@ -149,24 +95,29 @@ export function ListenerScreen({ onBack }) {
         setIsConnecting(false);
       }
     }
-  }, [handleStartPlayback, player, stopScan]);
+  }, [client, stopScan]);
 
   const disconnectSession = useCallback(() => {
-    clientRef.current?.disconnect();
+    client.disconnect();
     setConnectedHostIp(null);
     setStatus('Disconnected.');
-    try {
-      player.pause();
-    } catch {}
-  }, [player]);
+  }, [client]);
 
   const handleBack = () => {
-    clientRef.current?.disconnect();
-    try {
-      player.pause();
-    } catch {}
+    client.disconnect();
     onBack();
   };
+
+  useEffect(() => {
+    isMounted.current = true;
+    const scanTimer = setTimeout(startScan, 0);
+
+    return () => {
+      clearTimeout(scanTimer);
+      isMounted.current = false;
+      client.disconnect();
+    };
+  }, [client, startScan]);
 
   return (
     <View style={styles.container}>
