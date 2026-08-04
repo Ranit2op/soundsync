@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { setAudioModeAsync } from 'expo-audio';
 import { paperTheme } from './src/theme/paperTheme';
 import { HomeScreen } from './src/screens/HomeScreen';
@@ -18,7 +19,8 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <PaperProvider theme={paperTheme}>
+      <PaperProvider theme={paperTheme} settings={{ icon: props => <MaterialCommunityIcons {...props} /> }}>
+
         {screen === 'home' && (
           <HomeScreen
             onSelectHost={() => setScreen('host')}

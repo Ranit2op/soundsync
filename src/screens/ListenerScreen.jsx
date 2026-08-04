@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
-import { Button, Text, Card, ActivityIndicator, TextInput, IconButton } from 'react-native-paper';
+import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { Button, Text, ActivityIndicator, TextInput, IconButton, Card } from 'react-native-paper';
+import { LinearGradient } from 'expo-linear-gradient';
 import { ListenerClient } from '../network/ListenerClient';
+import { AudioOrb } from '../components/AudioOrb';
 
 export function ListenerScreen({ onBack }) {
   const [status, setStatus] = useState('');
@@ -119,313 +121,619 @@ export function ListenerScreen({ onBack }) {
     };
   }, [client, startScan]);
 
+  const scanPercent = scanProgress.total > 0
+    ? Math.round((scanProgress.current / scanProgress.total) * 100)
+    : 0;
+
   return (
-    <View style={styles.container}>
-      <Button icon="arrow-left" mode="text" onPress={handleBack} style={styles.backButton}>
-        Back
-      </Button>
+    <LinearGradient
+      colors={['#EAE4F8', '#F4F1FA', '#F8F7FC']}
+      start={{ x: 0.5, y: 0 }}
+      end={{ x: 0.5, y: 1 }}
+      style={styles.container}
+    >
+      {/* Top Bar with Floating Back Button - Reference Inspired */}
+      <View style={styles.navHeader}>
+        <TouchableOpacity
+          activeOpacity={0.75}
+          onPress={handleBack}
+          style={styles.circularBackButton}
+        >
+          <IconButton icon="chevron-left" size={24} iconColor="#1E1B2E" style={styles.iconZero} />
+        </TouchableOpacity>
 
-      <Text variant="displaySmall" style={styles.title}>Listener</Text>
-      <Text variant="bodyMedium" style={styles.subtitle}>
-        Connect to a broadcasting host nearby
-      </Text>
+        <Text variant="titleMedium" style={styles.navTitle}>
+          Audio Listener
+        </Text>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {/* Status / Active Connection Card */}
-        <Card style={styles.card} mode="elevated">
-          <Card.Content style={styles.statusCardContent}>
-            {isConnecting && <ActivityIndicator animating={true} size="large" style={styles.loader} />}
+        <View style={styles.statusBadgeRight}>
+          <View style={[styles.badgeDot, connectedHostIp ? styles.badgeDotGreen : styles.badgeDotGray]} />
+          <Text style={styles.badgeText}>
+            {connectedHostIp ? 'CONNECTED' : isScanning ? 'SCANNING' : 'IDLE'}
+          </Text>
+        </View>
+      </View>
 
-            <Text variant="titleMedium" style={styles.statusHeader}>
-              {connectedHostIp ? `Connected to ${connectedHostIp}` : 'Network Status'}
-            </Text>
-            
-            {status ? <Text variant="bodyMedium" style={styles.statusText}>{status}</Text> : null}
-
-            {/* Scan Progress Bar & Stop Button */}
-            {isScanning && (
-              <View style={styles.scanningContainer}>
-                <Text style={styles.progressText}>
-                  Scanning subnet... ({scanProgress.current}/{scanProgress.total})
-                </Text>
-                <Button
-                  mode="outlined"
-                  icon="stop-circle-outline"
-                  onPress={stopScan}
-                  style={styles.stopButton}
-                  compact
-                >
-                  Stop Search
-                </Button>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Connected Immersive Visualizer Mode (Inspired directly by user reference image) */}
+        {connectedHostIp ? (
+          <View style={styles.connectedSection}>
+            <View style={styles.connectedHeader}>
+              <Text variant="headlineSmall" style={styles.connectedTitle}>
+                Receiving Live Stream
+              </Text>
+              <View style={styles.ipBadgePill}>
+                <IconButton icon="wifi" size={14} iconColor="#059669" style={styles.iconZero} />
+                <Text style={styles.ipBadgeText}>{connectedHostIp}</Text>
               </View>
-            )}
+            </View>
 
-            {/* Connected Actions */}
-            {connectedHostIp && (
-              <Button
-                mode="contained-tonal"
-                icon="close-circle-outline"
+            {/* Glowing Animated Audio Visualizer Orb */}
+            <View style={styles.orbWrapper}>
+              <AudioOrb active={true} size={200} />
+            </View>
+
+            <Text variant="bodyLarge" style={styles.liveStatusText}>
+              {status || 'Listening to synchronized live audio...'}
+            </Text>
+
+            {/* Glowing Disconnect Button - Reference Image Control Bar */}
+            <View style={styles.connectedBottomBar}>
+              <TouchableOpacity
+                activeOpacity={0.85}
                 onPress={disconnectSession}
-                style={styles.disconnectButton}
+                style={styles.disconnectTouchable}
               >
-                Disconnect
-              </Button>
-            )}
+                <View style={styles.disconnectGlowRing}>
+                  <LinearGradient
+                    colors={['#FF6B6B', '#EF4444']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.disconnectOrb}
+                  >
+                    <IconButton icon="power" size={30} iconColor="#FFFFFF" style={styles.iconZero} />
+                  </LinearGradient>
+                </View>
+                <Text style={styles.disconnectLabel}>Disconnect Stream</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          /* Unconnected / Scanning & Host Discovery Mode */
+          <View style={styles.discoverySection}>
+            {/* Status Card / Scan Progress */}
+            <View style={styles.statusCard}>
+              {isConnecting && (
+                <ActivityIndicator animating={true} size="large" color="#6C5CE7" style={styles.loader} />
+              )}
 
-            {/* Rescan Button if not connected */}
-            {!connectedHostIp && !isScanning && !isConnecting && (
-              <Button
-                mode="contained"
-                icon="radar"
-                onPress={startScan}
-                style={styles.rescanButton}
-              >
-                Rescan Network
-              </Button>
-            )}
+              <Text variant="titleMedium" style={styles.statusCardTitle}>
+                {isScanning ? 'Searching Local Network...' : 'Host Discovery'}
+              </Text>
 
-            {/* Error Message Display */}
-            {errorMsg && !isConnecting && (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorText}>{errorMsg}</Text>
+              {status ? <Text style={styles.statusCardSubtext}>{status}</Text> : null}
+
+              {/* Progress Bar when Scanning */}
+              {isScanning && (
+                <View style={styles.scanProgressBlock}>
+                  <View style={styles.progressTrack}>
+                    <LinearGradient
+                      colors={['#8B75F5', '#6C5CE7']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={[styles.progressFill, { width: `${scanPercent}%` }]}
+                    />
+                  </View>
+                  <View style={styles.progressRow}>
+                    <Text style={styles.progressDetailsText}>
+                      Scanning subnet ({scanProgress.current}/{scanProgress.total})
+                    </Text>
+                    <TouchableOpacity onPress={stopScan}>
+                      <Text style={styles.stopSearchText}>Stop</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* Rescan Action Button */}
+              {!isScanning && !isConnecting && (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={startScan}
+                  style={styles.rescanTouchable}
+                >
+                  <LinearGradient
+                    colors={['#8B75F5', '#6C5CE7']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.rescanGradient}
+                  >
+                    <IconButton icon="radar" size={20} iconColor="#FFFFFF" style={styles.iconZero} />
+                    <Text style={styles.rescanText}>Scan for Hosts</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
+
+              {/* Error Display */}
+              {errorMsg && !isConnecting && (
+                <View style={styles.errorBanner}>
+                  <IconButton icon="alert-circle-outline" size={20} iconColor="#EF4444" style={styles.iconZero} />
+                  <Text style={styles.errorText}>{errorMsg}</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Discovered Hosts Cards */}
+            <View style={styles.hostsHeaderRow}>
+              <Text variant="titleMedium" style={styles.hostsSectionTitle}>
+                Available Hosts
+              </Text>
+              <View style={styles.countPill}>
+                <Text style={styles.countPillText}>{discoveredHosts.length}</Text>
               </View>
-            )}
-          </Card.Content>
-        </Card>
-
-        {/* Discovered Hosts Section */}
-        {!connectedHostIp && (
-          <View style={styles.hostsSection}>
-            <Text variant="titleMedium" style={styles.sectionHeader}>
-              Available Hosts ({discoveredHosts.length})
-            </Text>
+            </View>
 
             {discoveredHosts.length === 0 && !isScanning && !isConnecting ? (
-              <Card style={styles.emptyCard} mode="outlined">
-                <Card.Content style={styles.emptyContent}>
-                  <Text variant="bodyMedium" style={styles.emptyText}>
-                    No hosts found on your local network. Make sure the Host device has started broadcasting.
-                  </Text>
-                </Card.Content>
-              </Card>
+              <View style={styles.emptyCard}>
+                <IconButton icon="wifi-off" size={32} iconColor="#A49DBA" style={styles.iconZero} />
+                <Text style={styles.emptyText}>
+                  No active broadcasting hosts found nearby. Ensure Host device started streaming.
+                </Text>
+              </View>
             ) : (
               discoveredHosts.map((host) => (
-                <Card key={host.ip} style={styles.hostCard} mode="elevated">
-                  <Card.Content style={styles.hostCardContent}>
-                    <IconButton icon="broadcast" size={28} style={styles.hostIcon} />
-                    <View style={styles.hostDetails}>
-                      <Text variant="titleMedium" style={styles.hostIp}>
+                <TouchableOpacity
+                  key={host.ip}
+                  activeOpacity={0.88}
+                  onPress={() => connectToHost(host.ip)}
+                  disabled={isConnecting}
+                  style={styles.hostCardTouchable}
+                >
+                  <View style={styles.hostCard}>
+                    <LinearGradient
+                      colors={['#8B75F5', '#6C5CE7']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.hostIconBadge}
+                    >
+                      <IconButton icon="broadcast" size={20} iconColor="#FFFFFF" style={styles.iconZero} />
+                    </LinearGradient>
+
+                    <View style={styles.hostMeta}>
+                      <Text variant="titleMedium" style={styles.hostIpText}>
                         {host.ip}
                       </Text>
-                      <Text variant="bodySmall" style={styles.hostTrack} numberOfLines={1}>
-                        🎵 {host.fileName}
+                      <Text variant="bodySmall" style={styles.hostTrackText} numberOfLines={1}>
+                        {host.fileName || 'Live System Audio'}
                       </Text>
                     </View>
-                    <Button
-                      mode="contained"
-                      onPress={() => connectToHost(host.ip)}
-                      disabled={isConnecting}
-                      compact
-                    >
-                      Connect
-                    </Button>
-                  </Card.Content>
-                </Card>
+
+                    <View style={styles.connectPill}>
+                      <Text style={styles.connectPillText}>Connect</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
               ))
             )}
-          </View>
-        )}
 
-        {/* Manual IP Section */}
-        {!connectedHostIp && (
-          <View style={styles.manualSection}>
-            {!showManualInput ? (
-              <Button
-                mode="text"
-                icon="keyboard-outline"
-                onPress={() => setShowManualInput(true)}
-                style={styles.manualToggle}
-              >
-                Connect via IP Address Manually
-              </Button>
-            ) : (
-              <Card style={styles.card} mode="outlined">
-                <Card.Content style={styles.manualCardContent}>
+            {/* Manual IP Entry Section */}
+            <View style={styles.manualSection}>
+              {!showManualInput ? (
+                <TouchableOpacity
+                  onPress={() => setShowManualInput(true)}
+                  style={styles.manualToggleBtn}
+                >
+                  <IconButton icon="keyboard-outline" size={18} iconColor="#6C5CE7" style={styles.iconZero} />
+                  <Text style={styles.manualToggleText}>Connect via IP Manually</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.manualCard}>
                   <TextInput
                     label="Host IP Address"
                     value={manualIp}
                     onChangeText={setManualIp}
-                    placeholder="e.g. 192.168.0.110"
+                    placeholder="e.g. 192.168.1.100"
                     keyboardType="numeric"
                     mode="outlined"
                     disabled={isConnecting}
-                    style={styles.input}
+                    style={styles.manualInput}
+                    outlineColor="#E8E2F4"
+                    activeOutlineColor="#6C5CE7"
                   />
-                  <View style={styles.manualActions}>
-                    <Button
-                      mode="contained"
+                  <View style={styles.manualActionRow}>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
                       onPress={() => connectToHost(manualIp.trim())}
                       disabled={!manualIp.trim() || isConnecting}
-                      style={{ flex: 1 }}
+                      style={[
+                        styles.manualConnectBtn,
+                        (!manualIp.trim() || isConnecting) && { opacity: 0.5 },
+                      ]}
                     >
-                      Connect
-                    </Button>
-                    <Button mode="text" onPress={() => setShowManualInput(false)}>
-                      Hide
+                      <Text style={styles.manualConnectText}>Connect</Text>
+                    </TouchableOpacity>
+                    <Button mode="text" onPress={() => setShowManualInput(false)} textColor="#7C7594">
+                      Close
                     </Button>
                   </View>
-                </Card.Content>
-              </Card>
-            )}
+                </View>
+              )}
+            </View>
           </View>
         )}
       </ScrollView>
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
-    paddingTop: 60,
-    backgroundColor: '#f8f9fa',
+    paddingHorizontal: 24,
+    paddingTop: 54,
+  },
+  navHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  circularBackButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  iconZero: {
+    margin: 0,
+  },
+  navTitle: {
+    fontWeight: '700',
+    color: '#1E1B2E',
+    fontSize: 17,
+  },
+  statusBadgeRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 6,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  badgeDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+  },
+  badgeDotGreen: {
+    backgroundColor: '#10B981',
+  },
+  badgeDotGray: {
+    backgroundColor: '#9CA3AF',
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#1E1B2E',
+    letterSpacing: 0.5,
   },
   scrollContent: {
     paddingBottom: 40,
   },
-  backButton: {
-    alignSelf: 'flex-start',
-    marginBottom: 12,
-    marginLeft: -8,
+
+  /* Connected Mode Styles */
+  connectedSection: {
+    alignItems: 'center',
+    paddingVertical: 20,
   },
-  title: {
-    fontWeight: 'bold',
-    color: '#1a1a1a',
-  },
-  subtitle: {
-    color: '#6b7280',
-    marginTop: 4,
+  connectedHeader: {
+    alignItems: 'center',
     marginBottom: 20,
   },
-  card: {
+  connectedTitle: {
+    fontWeight: '800',
+    color: '#1E1B2E',
+    fontSize: 24,
+    textAlign: 'center',
+  },
+  ipBadgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D1FAE5',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     borderRadius: 20,
-    backgroundColor: '#ffffff',
-    marginBottom: 20,
-    elevation: 3,
+    marginTop: 10,
+    gap: 4,
   },
-  statusCardContent: {
-    padding: 20,
+  ipBadgeText: {
+    color: '#047857',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  orbWrapper: {
+    marginVertical: 24,
+  },
+  liveStatusText: {
+    textAlign: 'center',
+    fontWeight: '600',
+    color: '#1E1B2E',
+    fontSize: 16,
+    marginHorizontal: 20,
+  },
+  connectedBottomBar: {
+    marginTop: 40,
     alignItems: 'center',
   },
-  statusHeader: {
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 4,
+  disconnectTouchable: {
+    alignItems: 'center',
   },
-  statusText: {
-    color: '#4b5563',
-    textAlign: 'center',
-    marginBottom: 12,
+  disconnectGlowRing: {
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  disconnectOrb: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  disconnectLabel: {
+    marginTop: 10,
+    fontWeight: '700',
+    fontSize: 14,
+    color: '#EF4444',
+  },
+
+  /* Discovery / Unconnected Mode Styles */
+  discoverySection: {
+    marginTop: 8,
+  },
+  statusCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#E8E2F4',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    elevation: 3,
   },
   loader: {
     marginBottom: 12,
   },
-  scanningContainer: {
-    alignItems: 'center',
-    marginTop: 8,
-    gap: 8,
-  },
-  progressText: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
-  stopButton: {
-    borderColor: '#ef4444',
-  },
-  disconnectButton: {
-    marginTop: 12,
-  },
-  rescanButton: {
-    marginTop: 8,
-    borderRadius: 12,
-  },
-  errorContainer: {
-    marginTop: 12,
-    padding: 10,
-    backgroundColor: '#fef2f2',
-    borderRadius: 8,
-    width: '100%',
-  },
-  errorText: {
-    color: '#dc2626',
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  hostsSection: {
-    marginBottom: 20,
-  },
-  sectionHeader: {
+  statusCardTitle: {
     fontWeight: '700',
-    color: '#374151',
-    marginBottom: 12,
+    color: '#1E1B2E',
+    fontSize: 17,
   },
-  emptyCard: {
-    borderRadius: 16,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#ffffff',
+  statusCardSubtext: {
+    color: '#6E6782',
+    marginTop: 4,
+    fontSize: 14,
   },
-  emptyContent: {
-    padding: 20,
+  scanProgressBlock: {
+    marginTop: 14,
+  },
+  progressTrack: {
+    height: 8,
+    backgroundColor: '#F0EBF9',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  emptyText: {
-    color: '#9ca3af',
-    textAlign: 'center',
+  progressDetailsText: {
+    fontSize: 12,
+    color: '#7C7594',
   },
-  hostCard: {
-    borderRadius: 16,
-    backgroundColor: '#ffffff',
-    marginBottom: 10,
-    elevation: 2,
+  stopSearchText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#EF4444',
   },
-  hostCardContent: {
+  rescanTouchable: {
+    marginTop: 14,
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  rescanGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    gap: 8,
   },
-  hostIcon: {
-    backgroundColor: '#eef2ff',
-    marginRight: 12,
+  rescanText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 15,
   },
-  hostDetails: {
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEE2E2',
+    padding: 12,
+    borderRadius: 14,
+    marginTop: 12,
+    gap: 8,
+  },
+  errorText: {
+    color: '#B91C1C',
+    fontSize: 13,
+    flex: 1,
+  },
+  hostsHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+    gap: 8,
+  },
+  hostsSectionTitle: {
+    fontWeight: '700',
+    color: '#1E1B2E',
+    fontSize: 18,
+  },
+  countPill: {
+    backgroundColor: '#EDE9FE',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  countPillText: {
+    color: '#6C5CE7',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  emptyCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E8E2F4',
+    borderStyle: 'dashed',
+    marginBottom: 20,
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#7C7594',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  hostCardTouchable: {
+    marginBottom: 12,
+    borderRadius: 20,
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  hostCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E8E2F4',
+  },
+  hostIconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  hostMeta: {
     flex: 1,
     marginRight: 8,
   },
-  hostIp: {
+  hostIpText: {
     fontWeight: '700',
-    color: '#111827',
+    color: '#1E1B2E',
+    fontSize: 16,
   },
-  hostTrack: {
-    color: '#6b7280',
+  hostTrackText: {
+    color: '#7C7594',
+    fontSize: 12,
     marginTop: 2,
   },
+  connectPill: {
+    backgroundColor: '#EDE9FE',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+  },
+  connectPillText: {
+    color: '#6C5CE7',
+    fontWeight: '700',
+    fontSize: 13,
+  },
   manualSection: {
-    marginTop: 8,
+    marginTop: 16,
   },
-  manualToggle: {
-    alignSelf: 'center',
-  },
-  manualCardContent: {
-    padding: 16,
-    gap: 12,
-  },
-  input: {
-    backgroundColor: '#ffffff',
-  },
-  manualActions: {
+  manualToggleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+  },
+  manualToggleText: {
+    color: '#6C5CE7',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  manualCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#E8E2F4',
+    gap: 12,
+  },
+  manualInput: {
+    backgroundColor: '#FFFFFF',
+  },
+  manualActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  manualConnectBtn: {
+    flex: 1,
+    backgroundColor: '#6C5CE7',
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  manualConnectText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
   },
 });

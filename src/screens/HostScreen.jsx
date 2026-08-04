@@ -1,8 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { View, StyleSheet, Platform, Alert, PermissionsAndroid } from 'react-native';
-import { Button, Text, Card, IconButton, Chip } from 'react-native-paper';
+import { View, StyleSheet, Platform, Alert, PermissionsAndroid, TouchableOpacity } from 'react-native';
+import { Button, Text, IconButton, Chip } from 'react-native-paper';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Network from 'expo-network';
 import { HostServer } from '../network/HostServer';
+import { AudioOrb } from '../components/AudioOrb';
 
 // States for the broadcast lifecycle
 const STATE = {
@@ -15,7 +17,7 @@ const STATE = {
 export function HostScreen({ onBack }) {
   const [broadcastState, setBroadcastState] = useState(STATE.IDLE);
   const [ip, setIp] = useState('');
-  const [statusText, setStatusText] = useState('Tap "Start Broadcast" to begin streaming live audio.');
+  const [statusText, setStatusText] = useState('Tap to start live system audio broadcast');
   const serverRef = useRef(null);
 
   // Stop server and reset state on unmount
@@ -28,13 +30,11 @@ export function HostScreen({ onBack }) {
     };
   }, []);
 
- const startBroadcast = useCallback(async () => {
+  const startBroadcast = useCallback(async () => {
     try {
       setBroadcastState(STATE.REQUESTING);
       setStatusText('Waiting for Android permission...');
 
-      // ✅ NEW — RECORD_AUDIO runtime permission chaite hobe, noyle
-      // native audio policy register korte partbe na
       if (Platform.OS === 'android') {
         const granted = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
@@ -63,18 +63,14 @@ export function HostScreen({ onBack }) {
 
       serverRef.current = new HostServer();
 
-      // This calls AudioCaptureModule.startCapture() internally,
-      // which triggers the Android MediaProjection permission dialog.
-      // No file selection needed — it captures live system audio.
       await serverRef.current.start((errMsg) => {
-        // ✅ NEW — native capture fail korle ei callback ashbe
         setBroadcastState(STATE.ERROR);
         setStatusText(`Broadcast failed: ${errMsg}`);
         Alert.alert('Broadcast Stopped', errMsg, [{ text: 'OK' }]);
       });
 
       setBroadcastState(STATE.BROADCASTING);
-      setStatusText('🔴 Live — streaming system audio to listeners');
+      setStatusText('Streaming system audio live');
     } catch (e) {
       console.error('[HostScreen] Failed to start broadcast:', e);
       setBroadcastState(STATE.ERROR);
@@ -107,190 +103,289 @@ export function HostScreen({ onBack }) {
   const isBroadcasting = broadcastState === STATE.BROADCASTING;
 
   return (
-    <View style={styles.container}>
-      <Button icon="arrow-left" mode="text" onPress={onBack} style={styles.backButton}>
-        Back
-      </Button>
+    <LinearGradient
+      colors={['#EAE4F8', '#F4F1FA', '#F8F7FC']}
+      start={{ x: 0.5, y: 0 }}
+      end={{ x: 0.5, y: 1 }}
+      style={styles.container}
+    >
+      {/* Navigation Top Bar - Inspired by reference image */}
+      <View style={styles.navHeader}>
+        <TouchableOpacity
+          activeOpacity={0.75}
+          onPress={onBack}
+          style={styles.circularBackButton}
+        >
+          <IconButton icon="chevron-left" size={24} iconColor="#1E1B2E" style={styles.iconZero} />
+        </TouchableOpacity>
 
-      <Text variant="displaySmall" style={styles.title}>Host</Text>
-      <Text variant="bodyMedium" style={styles.subtitle}>
-        Stream live system audio to nearby listeners
-      </Text>
+        <Text variant="titleMedium" style={styles.navTitle}>
+          Host Audio
+        </Text>
 
-      {/* Status Card */}
-      <Card style={[styles.card, isBroadcasting && styles.cardLive]} mode="elevated">
-        <Card.Content style={styles.cardContent}>
-          <View style={styles.statusIconRow}>
-            <IconButton
-              icon={isBroadcasting ? 'broadcast' : isRequesting ? 'loading' : 'cast-audio'}
-              size={40}
-              iconColor={isBroadcasting ? '#ef4444' : '#6366f1'}
-              style={[styles.statusIcon, isBroadcasting && styles.statusIconLive]}
-            />
-          </View>
+        <View style={styles.statusBadgeRight}>
+          <View style={[styles.badgeDot, isBroadcasting ? styles.badgeDotLive : styles.badgeDotIdle]} />
+          <Text style={styles.badgeText}>
+            {isBroadcasting ? 'LIVE' : isRequesting ? 'REQ' : 'READY'}
+          </Text>
+        </View>
+      </View>
+
+      {/* Main Content Area with Glowing Orb */}
+      <View style={styles.mainContent}>
+        {/* Status Heading */}
+        <View style={styles.headingContainer}>
+          <Text variant="headlineSmall" style={styles.headingTitle}>
+            {isBroadcasting ? 'Broadcasting Live' : 'Start Audio Host'}
+          </Text>
 
           {isBroadcasting && ip ? (
-            <View style={styles.chipRow}>
-              <Chip icon="wifi" style={styles.chip} textStyle={styles.chipText}>
+            <View style={styles.ipContainer}>
+              <Chip icon="wifi" style={styles.ipChip} textStyle={styles.ipChipText}>
                 {ip}
-              </Chip>
-              <Chip icon="circle" style={styles.liveChip} textStyle={styles.liveChipText}>
-                LIVE
               </Chip>
             </View>
           ) : null}
+        </View>
 
-          <Text variant="bodyLarge" style={styles.statusText}>
+        {/* Central Audio Visualizer Orb */}
+        <View style={styles.orbWrapper}>
+          <AudioOrb active={isBroadcasting} size={190} />
+        </View>
+
+        {/* Status Message */}
+        <View style={styles.statusTextContainer}>
+          <Text variant="bodyLarge" style={styles.statusMainText}>
             {statusText}
           </Text>
-
           {!isBroadcasting && (
-            <Text variant="bodySmall" style={styles.hintText}>
-              Any audio playing on this device (YouTube, music, etc.) will be streamed live.
+            <Text variant="bodySmall" style={styles.statusSubText}>
+              Any audio playing on this device (YouTube, Spotify, etc.) will stream live to connected listeners.
             </Text>
           )}
-        </Card.Content>
-      </Card>
+        </View>
+      </View>
 
-      {/* Action Button */}
-      {!isBroadcasting ? (
-        <Button
-          mode="contained"
-          onPress={startBroadcast}
-          disabled={isRequesting}
-          loading={isRequesting}
-          icon="broadcast"
-          style={styles.startButton}
-          contentStyle={styles.startButtonContent}
-          labelStyle={styles.startButtonLabel}
-        >
-          {isRequesting ? 'Requesting Permission…' : 'Start Broadcast'}
-        </Button>
-      ) : (
-        <Button
-          mode="contained"
-          onPress={stopBroadcast}
-          icon="stop-circle"
-          style={styles.stopButton}
-          contentStyle={styles.startButtonContent}
-          labelStyle={styles.startButtonLabel}
-          buttonColor="#ef4444"
-        >
-          Stop Broadcast
-        </Button>
-      )}
+      {/* Bottom Controls Area - Circular Floating Button */}
+      <View style={styles.bottomBarContainer}>
+        {!isBroadcasting ? (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={startBroadcast}
+            disabled={isRequesting}
+            style={styles.actionBtnTouchable}
+          >
+            <View style={styles.outerGlowRing}>
+              <LinearGradient
+                colors={isRequesting ? ['#9CA3AF', '#6B7280'] : ['#8B75F5', '#6C5CE7', '#4834D4']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.mainActionOrb}
+              >
+                <IconButton
+                  icon={isRequesting ? 'sync' : 'broadcast'}
+                  size={34}
+                  iconColor="#FFFFFF"
+                  style={styles.iconZero}
+                />
+              </LinearGradient>
+            </View>
+            <Text style={styles.actionBtnLabel}>
+              {isRequesting ? 'Requesting Permission...' : 'Start Broadcast'}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={stopBroadcast}
+            style={styles.actionBtnTouchable}
+          >
+            <View style={[styles.outerGlowRing, styles.glowRingStop]}>
+              <LinearGradient
+                colors={['#FF6B6B', '#EF4444', '#DC2626']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.mainActionOrb}
+              >
+                <IconButton icon="stop" size={32} iconColor="#FFFFFF" style={styles.iconZero} />
+              </LinearGradient>
+            </View>
+            <Text style={[styles.actionBtnLabel, { color: '#EF4444' }]}>
+              Stop Broadcast
+            </Text>
+          </TouchableOpacity>
+        )}
 
-      {broadcastState === STATE.ERROR && (
-        <Button
-          mode="outlined"
-          onPress={() => {
-            setBroadcastState(STATE.IDLE);
-            setStatusText('Tap "Start Broadcast" to begin streaming live audio.');
-          }}
-          style={styles.retryButton}
-        >
-          Try Again
-        </Button>
-      )}
-    </View>
+        {broadcastState === STATE.ERROR && (
+          <Button
+            mode="text"
+            onPress={() => {
+              setBroadcastState(STATE.IDLE);
+              setStatusText('Tap to start live system audio broadcast');
+            }}
+            textColor="#6C5CE7"
+            style={styles.retryButton}
+          >
+            Try Again
+          </Button>
+        )}
+      </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
-    paddingTop: 60,
-    backgroundColor: '#f8f9fa',
+    paddingHorizontal: 24,
+    paddingTop: 54,
+    paddingBottom: 36,
+    justifyContent: 'space-between',
   },
-  backButton: {
-    alignSelf: 'flex-start',
+  navHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  circularBackButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  iconZero: {
+    margin: 0,
+  },
+  navTitle: {
+    fontWeight: '700',
+    color: '#1E1B2E',
+    fontSize: 17,
+  },
+  statusBadgeRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 6,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  badgeDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+  },
+  badgeDotLive: {
+    backgroundColor: '#EF4444',
+  },
+  badgeDotIdle: {
+    backgroundColor: '#10B981',
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#1E1B2E',
+    letterSpacing: 0.5,
+  },
+  mainContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+  },
+  headingContainer: {
+    alignItems: 'center',
     marginBottom: 20,
-    marginLeft: -8,
   },
-  title: {
-    fontWeight: 'bold',
-    color: '#1a1a1a',
+  headingTitle: {
+    fontWeight: '800',
+    color: '#1E1B2E',
+    fontSize: 24,
+    textAlign: 'center',
   },
-  subtitle: {
-    color: '#6b7280',
-    marginTop: 4,
-    marginBottom: 28,
+  ipContainer: {
+    marginTop: 10,
   },
-  card: {
-    borderRadius: 24,
-    backgroundColor: '#ffffff',
-    marginBottom: 20,
-    elevation: 4,
+  ipChip: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E8E2F4',
   },
-  cardLive: {
-    borderWidth: 2,
-    borderColor: '#ef4444',
+  ipChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6C5CE7',
   },
-  cardContent: {
-    padding: 24,
+  orbWrapper: {
+    marginVertical: 16,
+  },
+  statusTextContainer: {
+    alignItems: 'center',
+    marginTop: 16,
+    paddingHorizontal: 20,
+  },
+  statusMainText: {
+    textAlign: 'center',
+    fontWeight: '600',
+    color: '#1E1B2E',
+    fontSize: 16,
+  },
+  statusSubText: {
+    textAlign: 'center',
+    color: '#7C7594',
+    marginTop: 8,
+    lineHeight: 20,
+    fontSize: 13,
+  },
+  bottomBarContainer: {
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  actionBtnTouchable: {
     alignItems: 'center',
   },
-  statusIconRow: {
-    marginBottom: 12,
-  },
-  statusIcon: {
-    backgroundColor: '#eef2ff',
-    borderRadius: 40,
-  },
-  statusIconLive: {
-    backgroundColor: '#fee2e2',
-  },
-  chipRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
-    flexWrap: 'wrap',
+  outerGlowRing: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    backgroundColor: 'rgba(108, 92, 231, 0.15)',
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  chip: {
-    backgroundColor: '#eef2ff',
+  glowRingStop: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
   },
-  chipText: {
-    fontSize: 13,
+  mainActionOrb: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  liveChip: {
-    backgroundColor: '#fee2e2',
-  },
-  liveChipText: {
-    fontSize: 13,
-    color: '#ef4444',
+  actionBtnLabel: {
+    marginTop: 10,
     fontWeight: '700',
-  },
-  statusText: {
-    textAlign: 'center',
-    color: '#1a1a1a',
-    fontWeight: '500',
-    marginBottom: 8,
-  },
-  hintText: {
-    textAlign: 'center',
-    color: '#6b7280',
-    marginTop: 4,
-  },
-  startButton: {
-    borderRadius: 16,
-    marginTop: 8,
-    backgroundColor: '#6366f1',
-  },
-  stopButton: {
-    borderRadius: 16,
-    marginTop: 8,
+    fontSize: 14,
+    color: '#6C5CE7',
   },
   retryButton: {
-    borderRadius: 16,
-    marginTop: 12,
-  },
-  startButtonContent: {
-    paddingVertical: 8,
-  },
-  startButtonLabel: {
-    fontSize: 16,
-    fontWeight: '600',
+    marginTop: 8,
   },
 });
