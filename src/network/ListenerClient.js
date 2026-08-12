@@ -1,13 +1,16 @@
 import * as Network from 'expo-network';
 import TcpSocket from 'react-native-tcp-socket';
-import { NativeModules, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { Buffer } from 'buffer';
+import { AudioPlayerBridge } from '../native/AudioPlayerBridge';
 
 const FILE_PORT = 8990;
 const STREAM_SAMPLE_RATE = 44100;
 const STREAM_IS_STEREO = false;
-const { AudioPlayerModule } = NativeModules;
 const AUDIO_LOG_PREFIX = '[ListenerAudioPipeline]';
+
+const isElectronDesktop = () =>
+  typeof window !== 'undefined' && window.electronAPI != null;
 
 export class ListenerClient {
   hostIp = '';
@@ -26,7 +29,12 @@ export class ListenerClient {
     this.scanAbortController = new AbortController();
     const signal = this.scanAbortController.signal;
 
-    const localIp = await Network.getIpAddressAsync();
+    let localIp;
+    if (isElectronDesktop()) {
+      localIp = await window.electronAPI.getLanIp();
+    } else {
+      localIp = await Network.getIpAddressAsync();
+    }
     console.log('[ListenerClient] Local IP:', localIp);
     const parts = localIp.split('.');
     if (parts.length !== 4) throw new Error(`Invalid local IPv4 address: ${localIp}`);
@@ -96,9 +104,21 @@ export class ListenerClient {
   }
 
   async probeHttpDetails(ip, externalSignal) {
+    if (externalSignal?.aborted) return null;
+
+    // On Electron desktop: use IPC to bypass CORS restrictions
+    if (isElectronDesktop()) {
+      try {
+        const result = await window.electronAPI.probeHost({ ip, port: FILE_PORT, timeoutMs: 2000 });
+        return result;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // On Android/iOS: use standard fetch (no CORS issue on native)
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
-
     const onExternalAbort = () => controller.abort();
     externalSignal?.addEventListener('abort', onExternalAbort);
 
@@ -136,23 +156,43 @@ export class ListenerClient {
       throw new Error(`Host at ${hostIp} is not broadcasting.`);
     }
 
-    // Initialize native audio player (AudioTrack)
-    if (Platform.OS === 'android' && AudioPlayerModule) {
-      console.log(
-        `${AUDIO_LOG_PREFIX} Initializing AudioTrack: sampleRate=${STREAM_SAMPLE_RATE}, stereo=${STREAM_IS_STEREO}`
-      );
-      await AudioPlayerModule.initPlayer(STREAM_SAMPLE_RATE, STREAM_IS_STEREO);
-      console.log(`${AUDIO_LOG_PREFIX} AudioTrack init resolved successfully`);
-    } else if (Platform.OS === 'android') {
-      console.error(`${AUDIO_LOG_PREFIX} AudioPlayerModule is missing`);
-      throw new Error('AudioPlayerModule is not available in this build.');
+    // Electron Desktop path: all TCP is handled in the main process via IPC
+    if (isElectronDesktop()) {
+      await AudioPlayerBridge.startPlayer(STREAM_SAMPLE_RATE, STREAM_IS_STEREO ? 2 : 1);
+
+      window.electronAPI.removeAudioChunkListener?.();
+      window.electronAPI.removeListenerDisconnectedListener?.();
+
+      window.electronAPI.onAudioChunk((base64Chunk) => {
+        AudioPlayerBridge.writeChunk(base64Chunk).catch((e) => {
+          console.warn(`${AUDIO_LOG_PREFIX} writeChunk failed:`, e?.message || e);
+        });
+      });
+
+      window.electronAPI.onListenerDisconnected(() => {
+        if (this.isConnected) {
+          this.isConnected = false;
+          AudioPlayerBridge.stopPlayer().catch(() => {});
+          const cb = this.onDisconnectCallback;
+          this.onDisconnectCallback = null;
+          cb?.();
+        }
+      });
+
+      await window.electronAPI.connectToHost({ ip: hostIp, port: FILE_PORT });
+      this.isConnected = true;
+      onConnected?.();
+      return;
     }
 
-    // Establish TCP connection for real-time streaming
+    // Android path: AudioPlayerBridge handles native AudioTrack
+    if (Platform.OS === 'android') {
+      await AudioPlayerBridge.startPlayer(STREAM_SAMPLE_RATE, STREAM_IS_STEREO ? 2 : 1);
+    }
+
+    // Android/iOS: use react-native-tcp-socket
     return new Promise((resolve, reject) => {
       let isHeaderPassed = false;
-      // Accumulate header bytes across TCP chunks — the HTTP response header
-      // may be fragmented across multiple 'data' events by react-native-tcp-socket
       let headerBuffer = Buffer.alloc(0);
 
       this.clientSocket = TcpSocket.createConnection({
@@ -169,48 +209,24 @@ export class ListenerClient {
       this.clientSocket.on('data', (data) => {
         const dataBuffer = Buffer.from(data);
         this.receivedSocketChunkCount++;
-        console.log(
-          `${AUDIO_LOG_PREFIX} TCP chunk #${this.receivedSocketChunkCount} received: ${dataBuffer.length} bytes`
-        );
 
         if (!isHeaderPassed) {
-          // Accumulate into header buffer to handle fragmented HTTP headers
           headerBuffer = Buffer.concat([headerBuffer, dataBuffer]);
-          console.log(
-            `${AUDIO_LOG_PREFIX} Header accumulation buffer: ${headerBuffer.length} bytes total`
-          );
-
-          // Look for HTTP response header delimiter \r\n\r\n in the accumulated buffer
           const headerIndex = headerBuffer.indexOf('\r\n\r\n');
           if (headerIndex !== -1) {
             isHeaderPassed = true;
             const audioData = headerBuffer.slice(headerIndex + 4);
-            const headerText = headerBuffer.slice(0, headerIndex).toString();
-            console.log(
-              `${AUDIO_LOG_PREFIX} ✅ Stream header parsed (${headerIndex} bytes): "${headerText.substring(0, 80)}..."; initial audio bytes=${audioData.length}`
-            );
-            // Free the header buffer — no longer needed
             headerBuffer = null;
             if (audioData.length > 0) {
               this.processIncomingAudio(audioData);
-            } else {
-              console.log(`${AUDIO_LOG_PREFIX} Header chunk contained no audio payload`);
             }
             return;
           }
-
-          // Safety: prevent unbounded buffering if header never arrives
           if (headerBuffer.length > 4096) {
-            console.error(
-              `${AUDIO_LOG_PREFIX} ❌ HTTP header exceeded 4096 bytes without delimiter; aborting`
-            );
+            console.error(`${AUDIO_LOG_PREFIX} ❌ HTTP header exceeded 4096 bytes; aborting`);
             this.disconnect();
             return;
           }
-
-          console.log(
-            `${AUDIO_LOG_PREFIX} Waiting for complete stream header; accumulated=${headerBuffer.length} bytes`
-          );
           return;
         }
 
@@ -239,60 +255,27 @@ export class ListenerClient {
   }
 
   processIncomingAudio(chunkBuffer) {
-    console.log(
-      `${AUDIO_LOG_PREFIX} Processing audio network payload: ${chunkBuffer.length} bytes; previousBuffer=${this.incomingBuffer.length}`
-    );
     this.incomingBuffer = Buffer.concat([this.incomingBuffer, chunkBuffer]);
-    console.log(`${AUDIO_LOG_PREFIX} Framing buffer size after append: ${this.incomingBuffer.length} bytes`);
 
     while (this.incomingBuffer.length >= 4) {
       const payloadLen = this.incomingBuffer.readUInt32BE(0);
-      console.log(
-        `${AUDIO_LOG_PREFIX} Next frame declares payload=${payloadLen} bytes; available=${this.incomingBuffer.length - 4} bytes`
-      );
 
       if (payloadLen <= 0) {
-        console.warn(`${AUDIO_LOG_PREFIX} Invalid empty audio frame encountered; dropping 4-byte header`);
         this.incomingBuffer = this.incomingBuffer.slice(4);
         continue;
       }
 
-      // If buffer contains complete frame
       if (this.incomingBuffer.length >= 4 + payloadLen) {
         const payload = this.incomingBuffer.slice(4, 4 + payloadLen);
         this.incomingBuffer = this.incomingBuffer.slice(4 + payloadLen);
-        const nextFrameNumber = this.receivedFrameCount + 1;
-        console.log(
-          `${AUDIO_LOG_PREFIX} Audio frame #${nextFrameNumber} received: ${payload.length} PCM bytes; remainingBuffer=${this.incomingBuffer.length}`
-        );
 
-        if (Platform.OS === 'android' && AudioPlayerModule) {
-          try {
-            const base64Chunk = payload.toString('base64');
-            console.log(
-              `${AUDIO_LOG_PREFIX} Audio frame #${nextFrameNumber} encoded for native bridge: base64Length=${base64Chunk.length}`
-            );
-
-            AudioPlayerModule.writeChunk(base64Chunk)
-              .then((result) => {
-                console.log(
-                  `${AUDIO_LOG_PREFIX} Audio frame #${nextFrameNumber} writeChunk resolved: ${JSON.stringify(result)}`
-                );
-              })
-              .catch((e) => {
-                console.warn(
-                  `${AUDIO_LOG_PREFIX} Audio frame #${nextFrameNumber} writeChunk failed:`,
-                  e?.message || e
-                );
-              });
-          } catch (e) {
-            console.warn(
-              `${AUDIO_LOG_PREFIX} Audio frame #${nextFrameNumber} failed before native write:`,
-              e?.message || e
-            );
-          }
-        } else if (Platform.OS === 'android') {
-          console.warn(`${AUDIO_LOG_PREFIX} Cannot write frame #${nextFrameNumber}; AudioPlayerModule unavailable`);
+        try {
+          const base64Chunk = payload.toString('base64');
+          AudioPlayerBridge.writeChunk(base64Chunk).catch((e) => {
+            console.warn(`${AUDIO_LOG_PREFIX} writeChunk failed:`, e?.message || e);
+          });
+        } catch (e) {
+          console.warn(`${AUDIO_LOG_PREFIX} writeChunk error:`, e?.message || e);
         }
 
         this.receivedFrameCount++;
@@ -305,10 +288,6 @@ export class ListenerClient {
           this.lastReceiveLogAt = now;
         }
       } else {
-        // Wait for remaining frame data
-        console.log(
-          `${AUDIO_LOG_PREFIX} Incomplete audio frame; waiting for ${4 + payloadLen - this.incomingBuffer.length} more bytes`
-        );
         break;
       }
     }
@@ -318,16 +297,18 @@ export class ListenerClient {
     this.stopScan();
     this.isConnected = false;
 
-    if (this.clientSocket) {
+    if (isElectronDesktop()) {
+      window.electronAPI.removeAudioChunkListener?.();
+      window.electronAPI.removeListenerDisconnectedListener?.();
+      window.electronAPI.disconnectFromHost?.().catch(() => {});
+    } else if (this.clientSocket) {
       try {
         this.clientSocket.destroy();
       } catch (e) {}
       this.clientSocket = null;
     }
 
-    if (Platform.OS === 'android' && AudioPlayerModule) {
-      AudioPlayerModule.stopPlayer().catch(() => {});
-    }
+    AudioPlayerBridge.stopPlayer().catch(() => {});
 
     this.incomingBuffer = Buffer.alloc(0);
 

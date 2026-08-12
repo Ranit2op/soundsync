@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, StyleSheet, StatusBar, TouchableOpacity } from 'react-native';
-import { Text, IconButton } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 export function HomeScreen({ onSelectHost, onSelectListener }) {
   return (
@@ -22,7 +23,7 @@ export function HomeScreen({ onSelectHost, onSelectListener }) {
             end={{ x: 1, y: 1 }}
             style={styles.logoBadge}
           >
-            <IconButton icon="wifi" size={28} iconColor="#FFFFFF" style={styles.iconZero} />
+            <MaterialCommunityIcons name="wifi" size={28} color="#FFFFFF" />
           </LinearGradient>
         </View>
 
@@ -49,7 +50,7 @@ export function HomeScreen({ onSelectHost, onSelectListener }) {
               end={{ x: 1, y: 1 }}
               style={styles.iconBadge}
             >
-              <IconButton icon="broadcast" size={28} iconColor="#FFFFFF" style={styles.iconZero} />
+              <MaterialCommunityIcons name="broadcast" size={28} color="#FFFFFF" />
             </LinearGradient>
 
             <View style={styles.cardTextContainer}>
@@ -62,7 +63,7 @@ export function HomeScreen({ onSelectHost, onSelectListener }) {
             </View>
 
             <View style={styles.chevronCircle}>
-              <IconButton icon="chevron-right" size={20} iconColor="#6C5CE7" style={styles.iconZero} />
+              <MaterialCommunityIcons name="chevron-right" size={20} color="#6C5CE7" />
             </View>
           </View>
         </TouchableOpacity>
@@ -80,7 +81,7 @@ export function HomeScreen({ onSelectHost, onSelectListener }) {
               end={{ x: 1, y: 1 }}
               style={styles.iconBadge}
             >
-              <IconButton icon="headphones" size={28} iconColor="#FFFFFF" style={styles.iconZero} />
+              <MaterialCommunityIcons name="headphones" size={28} color="#FFFFFF" />
             </LinearGradient>
 
             <View style={styles.cardTextContainer}>
@@ -93,7 +94,7 @@ export function HomeScreen({ onSelectHost, onSelectListener }) {
             </View>
 
             <View style={styles.chevronCircle}>
-              <IconButton icon="chevron-right" size={20} iconColor="#059669" style={styles.iconZero} />
+              <MaterialCommunityIcons name="chevron-right" size={20} color="#059669" />
             </View>
           </View>
         </TouchableOpacity>
@@ -102,7 +103,7 @@ export function HomeScreen({ onSelectHost, onSelectListener }) {
       {/* Footer Info */}
       <View style={styles.footerContainer}>
         <View style={styles.footerPill}>
-          <IconButton icon="wifi-check" size={16} iconColor="#7C7594" style={styles.iconZero} />
+          <MaterialCommunityIcons name="wifi-check" size={16} color="#7C7594" />
           <Text variant="bodySmall" style={styles.footerText}>
             Devices must be connected to the same Wi-Fi
           </Text>

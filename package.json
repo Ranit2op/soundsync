@@ -1,11 +1,14 @@
 {
   "name": "bluetoothaudioapp",
-  "main": "node_modules/expo/AppEntry.js",
   "version": "1.0.0",
+  "description": "STADEL Cross-Platform Bluetooth & WiFi Audio Sharing Application",
+  "author": "STADEL Team <support@stadel.app>",
+  "main": "node_modules/expo/AppEntry.js",
   "dependencies": {
     "@expo/ui": "~57.0.8",
     "buffer": "^6.0.3",
     "expo": "~57.0.9",
+    "@expo/vector-icons": "^14.0.4",
     "expo-audio": "~57.0.3",
     "expo-build-properties": "~57.0.8",
     "expo-constants": "~57.0.8",
@@ -36,6 +39,8 @@
     "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.1"
   },
@@ -45,6 +50,12 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "desktop:dev": "NODE_ENV=development ELECTRON_START_URL=http://localhost:8082 electron ./desktop/main.js",
+    "desktop:clean": "node ./scripts/clean-desktop-build.js",
+    "desktop:build": "npm run desktop:clean && expo export --platform web && electron-builder --config electron-builder.json",
+    "desktop:build:linux": "npm run desktop:clean && expo export --platform web && electron-builder --linux AppImage deb --config electron-builder.json",
+    "desktop:build:win": "npm run desktop:clean && expo export --platform web && electron-builder --win nsis portable --config electron-builder.json",
+    "desktop:build:mac": "npm run desktop:clean && expo export --platform web && electron-builder --mac dmg --config electron-builder.json",
     "lint": "expo lint"
   },
   "private": true

@@ -7,6 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "bluetoothaudioapp",
     "userInterfaceStyle": "automatic",
+
     "ios": {
       "icon": "./assets/expo.icon",
       "infoPlist": {
@@ -14,6 +15,7 @@
       },
       "bundleIdentifier": "com.ranit25.BluetoothAudioApp"
     },
+
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -32,12 +34,13 @@
         "android.permission.ACCESS_NETWORK_STATE"
       ]
     },
+
     "web": {
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
+
     "plugins": [
-      "expo-router",
       [
         "expo-splash-screen",
         {
@@ -56,8 +59,8 @@
       ],
       "expo-audio"
     ],
+
     "experiments": {
-      "typedRoutes": true,
       "reactCompiler": true
     }
   }

@@ -1,7 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { View, StyleSheet, Platform, Alert, PermissionsAndroid, TouchableOpacity } from 'react-native';
-import { Button, Text, IconButton, Chip } from 'react-native-paper';
+import { Button, Text, Chip } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Network from 'expo-network';
 import { HostServer } from '../network/HostServer';
 import { AudioOrb } from '../components/AudioOrb';
@@ -58,7 +59,10 @@ export function HostScreen({ onBack }) {
         }
       }
 
-      const localIp = await Network.getIpAddressAsync();
+      const localIp =
+        typeof window !== 'undefined' && window.electronAPI?.getLanIp
+          ? await window.electronAPI.getLanIp()
+          : await Network.getIpAddressAsync();
       setIp(localIp);
 
       serverRef.current = new HostServer();
@@ -116,7 +120,7 @@ export function HostScreen({ onBack }) {
           onPress={onBack}
           style={styles.circularBackButton}
         >
-          <IconButton icon="chevron-left" size={24} iconColor="#1E1B2E" style={styles.iconZero} />
+          <MaterialCommunityIcons name="chevron-left" size={24} color="#1E1B2E" />
         </TouchableOpacity>
 
         <Text variant="titleMedium" style={styles.navTitle}>
@@ -182,11 +186,10 @@ export function HostScreen({ onBack }) {
                 end={{ x: 1, y: 1 }}
                 style={styles.mainActionOrb}
               >
-                <IconButton
-                  icon={isRequesting ? 'sync' : 'broadcast'}
+                <MaterialCommunityIcons
+                  name={isRequesting ? 'sync' : 'broadcast'}
                   size={34}
-                  iconColor="#FFFFFF"
-                  style={styles.iconZero}
+                  color="#FFFFFF"
                 />
               </LinearGradient>
             </View>
@@ -207,7 +210,7 @@ export function HostScreen({ onBack }) {
                 end={{ x: 1, y: 1 }}
                 style={styles.mainActionOrb}
               >
-                <IconButton icon="stop" size={32} iconColor="#FFFFFF" style={styles.iconZero} />
+                <MaterialCommunityIcons name="stop" size={32} color="#FFFFFF" />
               </LinearGradient>
             </View>
             <Text style={[styles.actionBtnLabel, { color: '#EF4444' }]}>

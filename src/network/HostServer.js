@@ -1,15 +1,14 @@
 import TcpSocket from 'react-native-tcp-socket';
-import { NativeModules, DeviceEventEmitter, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { Buffer } from 'buffer';
+import { AudioCaptureBridge } from '../native/AudioCaptureBridge';
 
 const FILE_PORT = 8990;
-const { AudioCaptureModule } = NativeModules;
 const HOST_LOG_PREFIX = '[HostAudioPipeline]';
 
 export class HostServer {
   server = null;
   audioSockets = new Set();
-  captureSubscription = null;
   isBroadcasting = false;
   broadcastFrameCount = 0;
   broadcastByteCount = 0;
@@ -22,121 +21,129 @@ export class HostServer {
     this.broadcastByteCount = 0;
     this.lastBroadcastLogAt = Date.now();
 
-    // Listen for live audio chunks from native AudioCaptureModule via DeviceEventEmitter
-    if (Platform.OS === 'android' && AudioCaptureModule) {
-      this.captureSubscription = DeviceEventEmitter.addListener('onAudioChunk', (event) => {
-        if (!this.isBroadcasting) return;
-        
-        if (this.audioSockets.size === 0) {
-          // Log periodically when recording audio but no listeners are connected
-          const now = Date.now();
-          if (now - this.lastBroadcastLogAt >= 5000) {
-            console.log(`${HOST_LOG_PREFIX} 🎙️ Audio captured from system, but 0 listeners connected currently.`);
-            this.lastBroadcastLogAt = now;
+    // Start live audio capture via cross-platform AudioCaptureBridge
+    try {
+      await AudioCaptureBridge.startCapture(
+        (base64Pcm) => {
+          if (!this.isBroadcasting) return;
+
+          if (typeof window !== 'undefined' && window.electronAPI?.broadcastAudioChunk) {
+            window.electronAPI.broadcastAudioChunk(base64Pcm).catch(() => {});
+            this.broadcastFrameCount++;
+            const now = Date.now();
+            if (now - this.lastBroadcastLogAt >= 5000) {
+              console.log(`${HOST_LOG_PREFIX} 🎙️ Desktop audio capturing & broadcasting live.`);
+              this.lastBroadcastLogAt = now;
+            }
+            return;
           }
-          return;
+
+          if (this.audioSockets.size === 0) {
+            const now = Date.now();
+            if (now - this.lastBroadcastLogAt >= 5000) {
+              console.log(`${HOST_LOG_PREFIX} 🎙️ Audio captured, but 0 listeners connected currently.`);
+              this.lastBroadcastLogAt = now;
+            }
+            return;
+          }
+
+          try {
+            const pcmBuffer = Buffer.from(base64Pcm, 'base64');
+            this.broadcastAudioChunk(pcmBuffer);
+          } catch (e) {
+            console.error(`${HOST_LOG_PREFIX} ❌ Error processing audio chunk:`, e);
+          }
+        },
+        (errorMessage) => {
+          console.error(`${HOST_LOG_PREFIX} ❌ Audio capture error:`, errorMessage);
+          this.stop();
+          onCaptureError?.(errorMessage);
         }
-
-        try {
-          const pcmBuffer = Buffer.from(event.pcm, 'base64');
-          console.log(`${HOST_LOG_PREFIX} Received captured PCM chunk from native: ${pcmBuffer.length} bytes (base64Len=${event.pcm.length})`);
-          this.broadcastAudioChunk(pcmBuffer);
-        } catch (e) {
-          console.error(`${HOST_LOG_PREFIX} ❌ Error processing audio chunk:`, e);
-        }
-      });
-
-      // ✅ NEW — native capture fail korle এই event ashbe
-      this.errorSubscription = DeviceEventEmitter.addListener('onCaptureError', (event) => {
-        console.error(`${HOST_LOG_PREFIX} ❌ Native capture failed:`, event.message);
-        this.stop();
-        onCaptureError?.(event.message);
-      });
-
-      // Request media projection permission & start capture
-      try {
-        await AudioCaptureModule.startCapture();
-        console.log(`${HOST_LOG_PREFIX} ✅ Live system audio capture started`);
-      } catch (e) {
-        console.error(`${HOST_LOG_PREFIX} ❌ Failed to start live capture:`, e);
-        throw e;
-      }
+      );
+      console.log(`${HOST_LOG_PREFIX} ✅ Live system audio capture started`);
+    } catch (e) {
+      console.error(`${HOST_LOG_PREFIX} ❌ Failed to start live capture:`, e);
+      throw e;
     }
 
-    this.startServer();
+    await this.startServer();
   }
 
-  startServer() {
-    this.server = TcpSocket.createServer((socket) => {
-      let isStreamClient = false;
-      // Accumulate request data to handle TCP fragmentation of the HTTP request
-      let requestBuffer = '';
+  async startServer() {
+    if (typeof window !== 'undefined' && window.electronAPI?.startTcpServer) {
+      console.log('[HostServer] Initializing Electron Desktop TCP Server...');
+      await window.electronAPI.startTcpServer({ port: FILE_PORT });
+      console.log(`[HostServer] ✅ Electron Desktop TCP Server active on 0.0.0.0:${FILE_PORT}`);
+      return;
+    }
 
-      socket.on('data', (data) => {
-        if (isStreamClient) {
-          // Already subscribed to stream; ignore further incoming data
-          return;
-        }
+    if (Platform.OS === 'android' || Platform.OS === 'ios') {
+      try {
+        this.server = TcpSocket.createServer((socket) => {
+          let isStreamClient = false;
+          let requestBuffer = '';
 
-        requestBuffer += data.toString();
+          socket.on('data', (data) => {
+            if (isStreamClient) return;
 
-        // Wait until we have a complete HTTP request (ends with \r\n\r\n)
-        if (!requestBuffer.includes('\r\n\r\n')) {
-          console.log(`[HostServer] Partial request received, accumulating... (${requestBuffer.length} bytes)`);
-          return;
-        }
+            requestBuffer += data.toString();
+            if (!requestBuffer.includes('\r\n\r\n')) return;
 
-        const request = requestBuffer;
-        // Clear the buffer since we have a complete request
-        requestBuffer = '';
+            const request = requestBuffer;
+            requestBuffer = '';
 
-        if (request.startsWith('GET /discover')) {
-          this.sendJsonResponse(socket, {
-            status: 'live',
-            fileName: 'Live System Audio',
-            isLive: true,
+            if (request.startsWith('GET /discover')) {
+              this.sendJsonResponse(socket, {
+                status: 'live',
+                fileName: 'Live System Audio',
+                isLive: true,
+              });
+              return;
+            } else if (request.startsWith('GET /ping')) {
+              this.sendJsonResponse(socket, { hostTime: Date.now() });
+              return;
+            } else if (request.startsWith('GET /live') || request.startsWith('STREAM')) {
+              isStreamClient = true;
+              this.audioSockets.add(socket);
+              console.log(`[HostServer] 🎧 Listener connected to stream. Active listeners: ${this.audioSockets.size}`);
+              const header =
+                `HTTP/1.1 200 OK\r\n` +
+                `Content-Type: audio/pcm\r\n` +
+                `Connection: keep-alive\r\n\r\n`;
+              socket.write(header);
+              return;
+            }
+
+            console.warn(`[HostServer] Unrecognized request: "${request.substring(0, 60)}"`);
           });
-          return;
-        } else if (request.startsWith('GET /ping')) {
-          this.sendJsonResponse(socket, { hostTime: Date.now() });
-          return;
-        } else if (request.startsWith('GET /live') || request.startsWith('STREAM')) {
-          // Subscribe socket to live stream
-          isStreamClient = true;
-          this.audioSockets.add(socket);
-          console.log(`[HostServer] 🎧 Listener connected to stream. Active listeners: ${this.audioSockets.size}`);
-          
-          // Send stream HTTP header response
-          const header =
-            `HTTP/1.1 200 OK\r\n` +
-            `Content-Type: audio/pcm\r\n` +
-            `Connection: keep-alive\r\n\r\n`;
-          socket.write(header);
-          return;
+
+          const cleanupSocket = () => {
+            if (this.audioSockets.has(socket)) {
+              this.audioSockets.delete(socket);
+              console.log(`[HostServer] 🔌 Listener disconnected. Active listeners: ${this.audioSockets.size}`);
+            }
+          };
+
+          socket.on('close', cleanupSocket);
+          socket.on('error', cleanupSocket);
+          socket.on('end', cleanupSocket);
+        });
+
+        if (this.server && typeof this.server.listen === 'function') {
+          this.server.listen({ port: FILE_PORT, host: '0.0.0.0' }, () => {
+            console.log(`[HostServer] ✅ Native TCP Server active on 0.0.0.0:${FILE_PORT}`);
+          });
+
+          this.server.on('error', (err) => {
+            console.error(`[HostServer] ❌ Server error:`, err?.message || err);
+          });
         }
-
-        console.warn(`[HostServer] Unrecognized request: "${request.substring(0, 60)}"`);
-      });
-
-      const cleanupSocket = () => {
-        if (this.audioSockets.has(socket)) {
-          this.audioSockets.delete(socket);
-          console.log(`[HostServer] 🔌 Listener disconnected. Active listeners: ${this.audioSockets.size}`);
-        }
-      };
-
-      socket.on('close', cleanupSocket);
-      socket.on('error', cleanupSocket);
-      socket.on('end', cleanupSocket);
-    });
-
-    this.server.listen({ port: FILE_PORT, host: '0.0.0.0' }, () => {
-      console.log(`[HostServer] ✅ Server active on 0.0.0.0:${FILE_PORT}`);
-    });
-
-    this.server.on('error', (err) => {
-      console.error(`[HostServer] ❌ Server error:`, err?.message || err);
-    });
+      } catch (err) {
+        console.error('[HostServer] Failed to initialize native TCP socket:', err);
+      }
+    } else {
+      console.warn('[HostServer] ⚠️ TCP Server is running in web browser fallback mode.');
+    }
   }
 
   sendJsonResponse(socket, data) {
@@ -157,7 +164,6 @@ export class HostServer {
   broadcastAudioChunk(pcmBuffer) {
     if (this.audioSockets.size === 0) return;
 
-    // Framing: 4-byte big endian length prefix followed by PCM payload
     const header = Buffer.alloc(4);
     header.writeUInt32BE(pcmBuffer.length, 0);
     const frame = Buffer.concat([header, pcmBuffer]);
@@ -180,22 +186,15 @@ export class HostServer {
       this.lastBroadcastLogAt = now;
     }
   }
-stop() {
+
+  stop() {
     console.log('[HostServer] 🛑 Stopping live broadcast server...');
     this.isBroadcasting = false;
 
-    if (this.captureSubscription) {
-      this.captureSubscription.remove();
-      this.captureSubscription = null;
-    }
+    AudioCaptureBridge.stopCapture();
 
-    if (this.errorSubscription) {           // ✅ NEW
-      this.errorSubscription.remove();
-      this.errorSubscription = null;
-    }
-
-    if (Platform.OS === 'android' && AudioCaptureModule) {
-      AudioCaptureModule.stopCapture().catch(() => {});
+    if (typeof window !== 'undefined' && window.electronAPI?.stopTcpServer) {
+      window.electronAPI.stopTcpServer().catch(() => {});
     }
 
     for (const socket of this.audioSockets) {

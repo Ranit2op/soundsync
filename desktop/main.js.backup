@@ -1,0 +1,52 @@
+const { app, BrowserWindow, ipcMain, desktopCapturer } = require('electron');
+const path = require('path');
+
+let mainWindow;
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1000,
+    height: 720,
+    title: 'STADEL Desktop Audio Sharing',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: false,
+    },
+  });
+
+  const isDev = process.env.NODE_ENV === 'development';
+  const devServerUrl = process.env.ELECTRON_START_URL || 'http://localhost:8082';
+
+  if (isDev) {
+    mainWindow.loadURL(devServerUrl);
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  }
+}
+
+// IPC Handler to fetch desktop screen/audio sources for system audio capture
+ipcMain.handle('get-desktop-source-id', async () => {
+  try {
+    const sources = await desktopCapturer.getSources({ types: ['screen', 'window', 'audio'] });
+    if (sources && sources.length > 0) {
+      return sources[0].id;
+    }
+  } catch (err) {
+    console.error('Failed to get desktop sources:', err);
+  }
+  return null;
+});
+
+app.whenReady().then(() => {
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});

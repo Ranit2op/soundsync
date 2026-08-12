@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { Button, Text, ActivityIndicator, TextInput, IconButton, Card } from 'react-native-paper';
+import { Button, Text, ActivityIndicator, TextInput } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { ListenerClient } from '../network/ListenerClient';
 import { AudioOrb } from '../components/AudioOrb';
 
@@ -139,7 +140,7 @@ export function ListenerScreen({ onBack }) {
           onPress={handleBack}
           style={styles.circularBackButton}
         >
-          <IconButton icon="chevron-left" size={24} iconColor="#1E1B2E" style={styles.iconZero} />
+          <MaterialCommunityIcons name="chevron-left" size={24} color="#1E1B2E" />
         </TouchableOpacity>
 
         <Text variant="titleMedium" style={styles.navTitle}>
@@ -167,7 +168,7 @@ export function ListenerScreen({ onBack }) {
                 Receiving Live Stream
               </Text>
               <View style={styles.ipBadgePill}>
-                <IconButton icon="wifi" size={14} iconColor="#059669" style={styles.iconZero} />
+                <MaterialCommunityIcons name="wifi" size={14} color="#059669" />
                 <Text style={styles.ipBadgeText}>{connectedHostIp}</Text>
               </View>
             </View>
@@ -195,7 +196,7 @@ export function ListenerScreen({ onBack }) {
                     end={{ x: 1, y: 1 }}
                     style={styles.disconnectOrb}
                   >
-                    <IconButton icon="power" size={30} iconColor="#FFFFFF" style={styles.iconZero} />
+                    <MaterialCommunityIcons name="power" size={30} color="#FFFFFF" />
                   </LinearGradient>
                 </View>
                 <Text style={styles.disconnectLabel}>Disconnect Stream</Text>
@@ -252,7 +253,7 @@ export function ListenerScreen({ onBack }) {
                     end={{ x: 1, y: 1 }}
                     style={styles.rescanGradient}
                   >
-                    <IconButton icon="radar" size={20} iconColor="#FFFFFF" style={styles.iconZero} />
+                    <MaterialCommunityIcons name="radar" size={20} color="#FFFFFF" />
                     <Text style={styles.rescanText}>Scan for Hosts</Text>
                   </LinearGradient>
                 </TouchableOpacity>
@@ -261,7 +262,7 @@ export function ListenerScreen({ onBack }) {
               {/* Error Display */}
               {errorMsg && !isConnecting && (
                 <View style={styles.errorBanner}>
-                  <IconButton icon="alert-circle-outline" size={20} iconColor="#EF4444" style={styles.iconZero} />
+                  <MaterialCommunityIcons name="alert-circle-outline" size={20} color="#EF4444" />
                   <Text style={styles.errorText}>{errorMsg}</Text>
                 </View>
               )}
@@ -279,7 +280,7 @@ export function ListenerScreen({ onBack }) {
 
             {discoveredHosts.length === 0 && !isScanning && !isConnecting ? (
               <View style={styles.emptyCard}>
-                <IconButton icon="wifi-off" size={32} iconColor="#A49DBA" style={styles.iconZero} />
+                <MaterialCommunityIcons name="wifi-off" size={32} color="#A49DBA" />
                 <Text style={styles.emptyText}>
                   No active broadcasting hosts found nearby. Ensure Host device started streaming.
                 </Text>
@@ -300,7 +301,7 @@ export function ListenerScreen({ onBack }) {
                       end={{ x: 1, y: 1 }}
                       style={styles.hostIconBadge}
                     >
-                      <IconButton icon="broadcast" size={20} iconColor="#FFFFFF" style={styles.iconZero} />
+                      <MaterialCommunityIcons name="broadcast" size={20} color="#FFFFFF" />
                     </LinearGradient>
 
                     <View style={styles.hostMeta}>
@@ -327,7 +328,7 @@ export function ListenerScreen({ onBack }) {
                   onPress={() => setShowManualInput(true)}
                   style={styles.manualToggleBtn}
                 >
-                  <IconButton icon="keyboard-outline" size={18} iconColor="#6C5CE7" style={styles.iconZero} />
+                  <MaterialCommunityIcons name="keyboard-outline" size={18} color="#6C5CE7" />
                   <Text style={styles.manualToggleText}>Connect via IP Manually</Text>
                 </TouchableOpacity>
               ) : (

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { setAudioModeAsync } from 'expo-audio';
 import { paperTheme } from './src/theme/paperTheme';
 import { HomeScreen } from './src/screens/HomeScreen';
