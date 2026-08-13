@@ -1,9 +1,13 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const netModule = require('net');
 const os = require('os');
+
+// Enable uninhibited Web Audio playback and PulseAudio system audio loopback capture
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+app.commandLine.appendSwitch('enable-features', 'PulseaudioLoopbackForScreenShare');
 
 let mainWindow;
 let serverPort = 0;
@@ -75,6 +79,40 @@ function createWindow() {
       webSecurity: true,
     },
   });
+
+  // Required in Electron 17+: intercept getDisplayMedia() calls from the renderer
+  // and fulfil them with a real desktop source. Without this handler,
+  // getDisplayMedia throws NotSupportedError regardless of platform.
+  mainWindow.webContents.session.setDisplayMediaRequestHandler(
+    async (request, callback) => {
+      try {
+        const sources = await desktopCapturer.getSources({ types: ['screen'] });
+        if (!sources || sources.length === 0) {
+          // No sources means Screen Recording permission was denied by macOS.
+          // callback(null) cleanly rejects the getDisplayMedia promise in the renderer.
+          console.error(
+            '[DisplayMediaHandler] No screen sources found.\n' +
+            '  → On macOS: System Settings → Privacy & Security → Screen Recording → enable Electron'
+          );
+          callback(null);
+          return;
+        }
+        // audio: loopback captures system audio on supported platforms.
+        // On macOS without BlackHole the audio track will be silent —
+        // the zero-track guard in AudioCaptureBridge will catch that.
+        callback({ video: sources[0], audio: 'loopback' });
+      } catch (err) {
+        console.error(
+          '[DisplayMediaHandler] getSources() failed — Screen Recording permission likely denied.\n' +
+          '  → On macOS: System Settings → Privacy & Security → Screen Recording → enable Electron\n' +
+          '  Error:', err.message || err
+        );
+        // callback(null) = cleanly reject. Do NOT call callback({}) — that causes
+        // "Video was requested, but no video stream was provided" crash.
+        callback(null);
+      }
+    }
+  );
 
   const isDev = process.env.NODE_ENV === 'development';
   const devServerUrl =
@@ -172,9 +210,11 @@ ipcMain.handle('connect-to-host', async (event, { ip, port }) => {
     let isHeaderPassed = false;
     let headerBuffer = Buffer.alloc(0);
     let incomingBuffer = Buffer.alloc(0);
+    let hasResolved = false;
 
     listenerSocket = new netModule.Socket();
     listenerSocket.connect({ port: port || 8990, host: ip }, () => {
+      hasResolved = true;
       listenerSocket.write(`GET /live HTTP/1.1\r\nHost: ${ip}\r\n\r\n`);
       resolve({ success: true });
     });
@@ -212,7 +252,10 @@ ipcMain.handle('connect-to-host', async (event, { ip, port }) => {
     }
 
     listenerSocket.on('error', (err) => {
-      if (!resolve._called) reject(new Error(`Failed to connect: ${err.message}`));
+      if (!hasResolved) {
+        hasResolved = true;
+        reject(new Error(`Failed to connect: ${err.message}`));
+      }
       const win = listenerWindowId && BrowserWindow.fromId(listenerWindowId);
       if (win && !win.isDestroyed()) win.webContents.send('listener-disconnected');
     });
