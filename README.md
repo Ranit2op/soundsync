@@ -1,56 +1,86 @@
-# Welcome to your Expo app 👋
+# 🎧 SoundSync - Real-Time Low-Latency Wi-Fi Audio Streaming
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+[![Android Release](https://img.shields.io/badge/Download-Android%20APK%20(v1.0.0)-brightgreen?style=for-the-badge&logo=android)](https://github.com/Ranit2op/soundsync/releases/download/v1.0.0/SoundSync-v1.0.0.apk)
+[![Windows Installer](https://img.shields.io/badge/Download-Windows%20Setup%20(v1.0.0)-blue?style=for-the-badge&logo=windows)](https://github.com/Ranit2op/soundsync/releases/download/v1.0.0/SoundSync-Setup-v1.0.0.exe)
+[![Windows Portable](https://img.shields.io/badge/Download-Windows%20Portable%20(v1.0.0)-lightgrey?style=for-the-badge&logo=windows)](https://github.com/Ranit2op/soundsync/releases/download/v1.0.0/SoundSync-v1.0.0-Portable.exe)
+[![Release](https://img.shields.io/github/v/release/Ranit2op/soundsync?style=for-the-badge&color=purple)](https://github.com/Ranit2op/soundsync/releases)
 
-## Get started
+**SoundSync** is a cross-platform (Windows & Android) application designed for seamless, ultra-low-latency real-time system audio streaming over a local Wi-Fi network. Easily broadcast your PC or phone's audio to any listening device with zero audio degradation.
 
-1. Install dependencies
+---
 
-   ```bash
-   npm install
-   ```
+## ✨ Features
 
-2. Start the app
+- 📡 **Real-time Wi-Fi Streaming:** Broadcast and stream lossless system audio across devices over your local Wi-Fi network.
+- 💻 **Windows Desktop Host & Listener:** Native loopback capture on Windows via Electron & Web Audio API to stream any system sound (music, movies, games, meetings) to connected clients.
+- 📱 **Android Mobile Host & Listener:** Built-in Kotlin native background services (`AudioCaptureService` and `AudioPlayerModule`) supporting Android `MediaProjection` and low-latency `AudioTrack` playback.
+- 🔄 **Bidirectional & Multi-device Support:** Any device can act as an **Audio Host** (broadcaster) or **Listener** (receiver) in real-time.
+- 🎨 **Modern Futuristic UI:** Sleek indigo-purple theme with custom 3D glowing sonic ring mascot, smooth gradients, and intuitive one-tap controls.
 
-   ```bash
-   npx expo start
-   ```
+---
 
-In the output, you'll find options to open the app in a
+## 🛠️ Tech Stack & Architecture
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- **Mobile Framework:** React Native 0.86 & Expo SDK 57 (New Architecture)
+- **Desktop Framework:** Electron 41 with Chromium system loopback capture
+- **Native Android Modules:** Kotlin, Java 17, Android NDK CMake, Gradle 9.3
+- **Networking:** Low-latency raw TCP sockets (`react-native-tcp-socket` on mobile, Node.js `net` on desktop)
+- **UI & Styling:** React Native Paper, Expo Linear Gradient, Material Community Icons
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+---
 
-## Get a fresh project
+## 🚀 Getting Started
 
-When you're ready, run:
-
+### 1. Prerequisites & Installation
 ```bash
-npm run reset-project
+# Clone the repository
+git clone https://github.com/Ranit2op/soundsync.git
+cd soundsync
+
+# Checkout multi branch
+git checkout multi
+
+# Install dependencies
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### 2. Run Mobile App (Android / Expo)
+```bash
+npx expo start
+```
+- Press `a` to run on Android device / emulator
 
-### Other setup steps
+### 3. Run Desktop App (Windows)
+```bash
+npm run desktop:dev
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+---
 
-## Learn more
+## 📦 Building Releases
 
-To learn more about developing your project with Expo, look at the following resources:
+### 📱 Android Standalone APK
+```bash
+cd android
+.\gradlew.bat assembleRelease
+```
+The output APK is generated at:
+```
+android/app/build/outputs/apk/release/app-release.apk
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+### 💻 Windows Desktop (.exe Installer & Portable)
+```bash
+npm run desktop:build:win
+```
+The output executables are generated at:
+```
+dist-desktop/SoundSync Setup 1.0.0.exe
+dist-desktop/SoundSync 1.0.0.exe
+```
 
-## Join the community
+---
 
-Join our community of developers creating universal apps.
+## 👤 Author
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Developed by **Ranit Saha** ([@Ranit2op](https://github.com/Ranit2op))

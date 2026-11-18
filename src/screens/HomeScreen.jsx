@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { View, StyleSheet, StatusBar, TouchableOpacity } from 'react-native';
 import { Text } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,10 +28,10 @@ export function HomeScreen({ onSelectHost, onSelectListener }) {
         </View>
 
         <Text variant="headlineLarge" style={styles.title}>
-          Wi-Fi Audio Sync
+          SoundSync
         </Text>
         <Text variant="bodyLarge" style={styles.subtitle}>
-          Stream live system audio seamlessly between devices over Wi-Fi
+          Low-latency real-time system audio streaming over Wi-Fi
         </Text>
       </View>
 
@@ -236,3 +236,4 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 });
+

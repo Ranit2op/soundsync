@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, session } = require('electron');
+﻿const { app, BrowserWindow, ipcMain, desktopCapturer, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -71,7 +71,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1000,
     height: 720,
-    title: 'STADEL Desktop Audio Sharing',
+    title: 'SoundSync Desktop Audio Streaming',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -92,22 +92,22 @@ function createWindow() {
           // callback(null) cleanly rejects the getDisplayMedia promise in the renderer.
           console.error(
             '[DisplayMediaHandler] No screen sources found.\n' +
-            '  → On macOS: System Settings → Privacy & Security → Screen Recording → enable Electron'
+            '  â†’ On macOS: System Settings â†’ Privacy & Security â†’ Screen Recording â†’ enable Electron'
           );
           callback(null);
           return;
         }
         // audio: loopback captures system audio on supported platforms.
-        // On macOS without BlackHole the audio track will be silent —
+        // On macOS without BlackHole the audio track will be silent â€”
         // the zero-track guard in AudioCaptureBridge will catch that.
         callback({ video: sources[0], audio: 'loopback' });
       } catch (err) {
         console.error(
-          '[DisplayMediaHandler] getSources() failed — Screen Recording permission likely denied.\n' +
-          '  → On macOS: System Settings → Privacy & Security → Screen Recording → enable Electron\n' +
+          '[DisplayMediaHandler] getSources() failed â€” Screen Recording permission likely denied.\n' +
+          '  â†’ On macOS: System Settings â†’ Privacy & Security â†’ Screen Recording â†’ enable Electron\n' +
           '  Error:', err.message || err
         );
-        // callback(null) = cleanly reject. Do NOT call callback({}) — that causes
+        // callback(null) = cleanly reject. Do NOT call callback({}) â€” that causes
         // "Video was requested, but no video stream was provided" crash.
         callback(null);
       }
@@ -327,7 +327,7 @@ ipcMain.handle('start-tcp-server', async (event, options) => {
         } else if (request.startsWith('GET /live') || request.startsWith('STREAM')) {
           isStreamClient = true;
           audioSockets.add(socket);
-          console.log(`[HostServer Desktop] 🎧 Listener connected to live audio stream. Total listeners: ${audioSockets.size}`);
+          console.log(`[HostServer Desktop] ðŸŽ§ Listener connected to live audio stream. Total listeners: ${audioSockets.size}`);
           const header =
             `HTTP/1.1 200 OK\r\n` +
             `Content-Type: audio/pcm\r\n` +
@@ -340,7 +340,7 @@ ipcMain.handle('start-tcp-server', async (event, options) => {
       const cleanup = () => {
         if (audioSockets.has(socket)) {
           audioSockets.delete(socket);
-          console.log(`[HostServer Desktop] 🔌 Listener disconnected. Total listeners: ${audioSockets.size}`);
+          console.log(`[HostServer Desktop] ðŸ”Œ Listener disconnected. Total listeners: ${audioSockets.size}`);
         }
       };
       socket.on('close', cleanup);
@@ -349,12 +349,12 @@ ipcMain.handle('start-tcp-server', async (event, options) => {
     });
 
     tcpServer.listen({ port, host: '0.0.0.0' }, () => {
-      console.log(`[HostServer Desktop] ✅ Server listening on 0.0.0.0:${port}`);
+      console.log(`[HostServer Desktop] âœ… Server listening on 0.0.0.0:${port}`);
       resolve({ success: true, port });
     });
 
     tcpServer.on('error', (err) => {
-      console.error('[HostServer Desktop] ❌ Server error:', err?.message || err);
+      console.error('[HostServer Desktop] âŒ Server error:', err?.message || err);
       reject(err);
     });
   });
@@ -388,7 +388,7 @@ ipcMain.handle('stop-tcp-server', async () => {
     try { tcpServer.close(); } catch (e) {}
     tcpServer = null;
   }
-  console.log('[HostServer Desktop] 🛑 Server stopped.');
+  console.log('[HostServer Desktop] ðŸ›‘ Server stopped.');
   return { success: true };
 });
 
@@ -414,4 +414,5 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+
 

@@ -1,34 +1,42 @@
-{
-  "appId": "com.ranit25.stadeldesktop",
-  "productName": "STADEL Audio Sharing",
-  "directories": {
-    "output": "dist-desktop"
-  },
-  "files": [
-    "dist/**/*",
-    "desktop/**/*",
-    "package.json",
-    "!node_modules/**/*",
-    "!android/**/*",
-    "!ios/**/*",
-    "!.expo/**/*"
-  ],
-  "asar": true,
-  "extraMetadata": {
-    "main": "desktop/main.js"
-  },
-  "linux": {
-    "executableName": "electron",
-    "target": ["AppImage", "deb"],
-    "category": "Audio"
-  },
-  "deb": {
-    "packageCategory": "sound"
-  },
-  "win": {
-    "target": ["nsis", "portable"]
-  },
-  "mac": {
-    "target": ["dmg"]
-  }
+﻿{
+    "appId":  "com.ranit25.soundsync",
+    "productName":  "SoundSync",
+    "directories":  {
+                        "output":  "dist-desktop"
+                    },
+    "files":  [
+                  "dist/**/*",
+                  "desktop/**/*",
+                  "package.json",
+                  "!node_modules/**/*",
+                  "!android/**/*",
+                  "!ios/**/*",
+                  "!.expo/**/*"
+              ],
+    "asar":  true,
+    "extraMetadata":  {
+                          "main":  "desktop/main.js"
+                      },
+    "linux":  {
+                  "executableName":  "electron",
+                  "target":  [
+                                 "AppImage",
+                                 "deb"
+                             ],
+                  "category":  "Audio"
+              },
+    "deb":  {
+                "packageCategory":  "sound"
+            },
+    "win":  {
+                "target":  [
+                               "nsis",
+                               "portable"
+                           ]
+            },
+    "mac":  {
+                "target":  [
+                               "dmg"
+                           ]
+            }
 }
